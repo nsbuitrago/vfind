@@ -1,4 +1,4 @@
-from vfind import Adapters, AlignParams, find_variants
+from vfind import find_variants
 import polars as pl
 import unittest
 
@@ -9,8 +9,9 @@ class TestFinder(unittest.TestCase):
     """
 
     def test_vfind(self):
-        adapters = Adapters("GGGCCCAGCCGGCCGGAT", "CCGGAGGCGGAGGTTCAG")
-        variants = find_variants("test_data/toy.fq.gz", adapters)
+        variants = find_variants(
+            "test_data/toy.fq.gz", ("GGGCCCAGCCGGCCGGAT", "CCGGAGGCGGAGGTTCAG")
+        )
         ground_truth = pl.read_csv("test_data/ground_truth.csv")
 
         assert variants.equals(ground_truth)

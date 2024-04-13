@@ -11,6 +11,20 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dynamic = ["version"]
+dependencies = [
+    "polars"
+]
+authors = [
+    {name = "Nicolas Buitrago", email = "44626938+nsbuitrago@users.noreply.github.com."}
+]
+description = "A simple variant finder for NGS data"
+readme = "README.md"
+license = {file = "LICENSE"}
+keywords = ["bioinformatics", "sequence analysis", "NGS", "variant finding"]
+
+[project.urls]
+Repository = "https://github.com/nsbuitrago/vfind"
+Issues = "https://github.com/nsbuitrago/vfind/issues"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]

@@ -10,59 +10,7 @@ use std::{fs::File, path::Path};
 
 use pyo3::{exceptions::PyIOError, prelude::*};
 
-const N_THREADS: u32 = 4;
-const QUEUE_LEN: usize = 2;
-
-/// Collection of constant adapter sequences flanking the variable regions of interest.
-#[derive(Debug)]
-#[pyclass]
-pub struct Adapters {
-    prefix: Vec<u8>,
-    suffix: Vec<u8>,
-}
-
-#[pymethods]
-impl Adapters {
-    /// Create a new collection of adapters
-    #[new]
-    pub fn new(prefix: String, suffix: String) -> PyResult<Self> {
-        Ok(Adapters {
-            prefix: prefix.into_bytes(),
-            suffix: suffix.into_bytes(),
-        })
-    }
-}
-
-/// Alignment scoring parameters
-#[pyclass]
-pub struct AlignParams {
-    #[pyo3(get, set)]
-    match_score: i32,
-    #[pyo3(get, set)]
-    mismatch_score: i32,
-    #[pyo3(get, set)]
-    gap_open_penalty: i32,
-    #[pyo3(get, set)]
-    gap_extend_penalty: i32,
-    #[pyo3(get, set)]
-    accept_prefix_alignment: f64,
-    #[pyo3(get, set)]
-    accept_suffix_alignment: f64,
-}
-
-impl Default for AlignParams {
-    fn default() -> Self {
-        AlignParams {
-            match_score: 3,
-            mismatch_score: -2,
-            gap_extend_penalty: 5,
-            gap_open_penalty: 2,
-            accept_prefix_alignment: 0.75,
-            accept_suffix_alignment: 0.75,
-        }
-    }
-}
-
+/// Translate a DNA sequence to an amino acid sequence
 pub fn translate(seq: &[u8]) -> String {
     let mut peptide = String::with_capacity(seq.len() / 3);
 
@@ -140,14 +88,82 @@ static ASCII_TO_INDEX: [usize; 128] = [
     4, 4, 4, 4, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, // 112-127  (116 = t, 117 = u)
 ];
 
+/// Get adapter aligner
+fn get_aligner(
+    prefix: &[u8],
+    scoring_matrix: &Matrix,
+    gap_open_penalty: i32,
+    gap_extend_penalty: i32,
+) -> Aligner {
+    let prefix_profile = Profile::new(prefix, true, scoring_matrix).unwrap();
+    Aligner::new()
+        .profile(prefix_profile)
+        .gap_open(gap_open_penalty)
+        .gap_extend(gap_extend_penalty)
+        .semi_global()
+        .scan()
+        .use_stats()
+        .build()
+}
+
+/// Find where adapter matches in the read if it exists
+fn find_adapter_match(
+    seq: &[u8],
+    adapter: &[u8],
+    aligner: &Aligner,
+    min_align_score: f64,
+    is_prefix: bool,
+) -> Option<usize> {
+    let adapter_match = {
+        let exact_match = memmem::find(seq, adapter);
+        if let Some(exact_match) = exact_match {
+            match is_prefix {
+                true => Some(exact_match + adapter.len()),
+                false => Some(exact_match),
+            }
+        } else {
+            let alignment = aligner.align(None, seq).unwrap();
+            let score = alignment.get_score();
+            if score as f64 > min_align_score {
+                match is_prefix {
+                    true => Some(alignment.get_length().unwrap() as usize),
+                    false => Some(seq.len() - alignment.get_length().unwrap() as usize),
+                }
+            } else {
+                None
+            }
+        }
+    };
+
+    adapter_match
+}
+
 #[pyfunction]
+#[pyo3(signature = (
+    fq_path,
+    adapters,
+    match_score=3,
+    mismatch_score=-2,
+    gap_open_penalty=5,
+    gap_extend_penalty=2,
+    accept_prefix_alignment=0.75,
+    accept_suffix_alignment=0.75,
+    n_threads=3,
+    queue_len=2,
+    skip_translation=false
+))]
 pub fn find_variants(
     fq_path: String,
-    adapters: &Adapters,
-    align_params: Option<&AlignParams>,
-    n_threads: Option<u32>,
-    queue_len: Option<usize>,
-    skip_translation: Option<bool>,
+    adapters: (String, String),
+    match_score: i32,
+    mismatch_score: i32,
+    gap_open_penalty: i32,
+    gap_extend_penalty: i32,
+    accept_prefix_alignment: f64,
+    accept_suffix_alignment: f64,
+    n_threads: u32,
+    queue_len: usize,
+    skip_translation: bool,
 ) -> PyResult<PyDataFrame> {
     let fq_path = Path::new(&fq_path);
     if !fq_path.exists() {
@@ -158,50 +174,30 @@ pub fn find_variants(
     let mut decoder = GzDecoder::new(&fq_file);
     let mut data = Vec::new();
     decoder.read_to_end(&mut data)?;
-
     let reader = Reader::new(data.as_slice());
 
-    let n_threads = n_threads.unwrap_or(N_THREADS);
-    let queue_len = queue_len.unwrap_or(QUEUE_LEN);
+    let scoring_matrix = Matrix::create(b"ATCG", match_score, mismatch_score)
+        .expect("Error creating scoring matrix");
 
-    let default_align_params = &AlignParams::default();
-    let align_params = align_params.unwrap_or(default_align_params);
-    let scoring_matrix = Matrix::create(
-        b"ATCG",
-        align_params.match_score,
-        align_params.mismatch_score,
-    )
-    .expect("Error creating scoring matrix");
+    let prefix = adapters.0.as_bytes();
+    let prefix_aligner = get_aligner(
+        &prefix,
+        &scoring_matrix,
+        gap_open_penalty,
+        gap_extend_penalty,
+    );
 
-    let prefix_profile = Profile::new(&adapters.prefix, true, &scoring_matrix).unwrap();
+    let suffix = adapters.1.as_bytes();
+    let suffix_aligner = get_aligner(
+        &suffix,
+        &scoring_matrix,
+        gap_open_penalty,
+        gap_extend_penalty,
+    );
 
-    let prefix_aligner = Aligner::new()
-        .profile(prefix_profile)
-        .gap_open(align_params.gap_open_penalty)
-        .gap_extend(align_params.gap_extend_penalty)
-        .semi_global()
-        .scan()
-        .use_stats()
-        .build();
-
-    let suffix_profile = Profile::new(&adapters.suffix, true, &scoring_matrix).unwrap();
-
-    let suffix_aligner = Aligner::new()
-        .profile(suffix_profile)
-        .gap_open(align_params.gap_open_penalty)
-        .gap_extend(align_params.gap_extend_penalty)
-        .semi_global()
-        .scan()
-        .use_stats()
-        .build();
-
-    let max_prefix_score = align_params.accept_prefix_alignment
-        * align_params.match_score as f64
-        * adapters.prefix.len() as f64;
-
-    let max_suffix_score = align_params.accept_suffix_alignment
-        * align_params.match_score as f64
-        * adapters.suffix.len() as f64;
+    // min score for accepted prefix and suffix alignment
+    let min_prefix_score = accept_prefix_alignment * match_score as f64 * prefix.len() as f64;
+    let min_suffix_score = accept_suffix_alignment * match_score as f64 * suffix.len() as f64;
 
     let mut variants: HashMap<String, u32> = HashMap::new();
 
@@ -211,36 +207,8 @@ pub fn find_variants(
         queue_len,
         |record, variant| {
             let seq = record.seq();
-
-            let start = {
-                let exact_start = memmem::find(seq, &adapters.prefix);
-                if let Some(exact_start) = exact_start {
-                    Some(exact_start + adapters.prefix.len())
-                } else {
-                    let alignment = prefix_aligner.align(None, seq).unwrap();
-                    let score = alignment.get_score();
-                    if score as f64 > max_prefix_score {
-                        Some(alignment.get_length().unwrap() as usize)
-                    } else {
-                        None
-                    }
-                }
-            };
-
-            let end = {
-                let exact_end = memmem::find(seq, &adapters.suffix);
-                if let Some(exact_end) = exact_end {
-                    Some(exact_end)
-                } else {
-                    let alignment = suffix_aligner.align(None, seq).unwrap();
-                    let score = alignment.get_score();
-                    if score as f64 > max_suffix_score {
-                        Some(seq.len() - alignment.get_length().unwrap() as usize)
-                    } else {
-                        None
-                    }
-                }
-            };
+            let start = find_adapter_match(seq, prefix, &prefix_aligner, min_prefix_score, true);
+            let end = find_adapter_match(seq, suffix, &suffix_aligner, min_suffix_score, false);
 
             if start.is_some() && end.is_some() && start.unwrap() < end.unwrap() {
                 *variant = Some(seq[start.unwrap()..end.unwrap()].to_vec());
@@ -248,7 +216,7 @@ pub fn find_variants(
         },
         |_, variant| {
             if let Some(variant) = variant {
-                if skip_translation.unwrap_or(false) {
+                if skip_translation {
                     let variant = String::from_utf8(variant.to_vec()).unwrap();
                     *variants.entry(variant).or_insert(0) += 1;
                 } else {
@@ -274,8 +242,6 @@ pub fn find_variants(
 /// vFind Python module
 #[pymodule]
 fn vfind(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_class::<Adapters>()?;
-    m.add_class::<AlignParams>()?;
     m.add_function(wrap_pyfunction!(find_variants, m)?)?;
     Ok(())
 }
@@ -284,18 +250,11 @@ fn vfind(_py: Python, m: &PyModule) -> PyResult<()> {
 mod tests {
     use super::*;
 
-    /// sanity check
-    #[test]
-    fn test_adapter_construction() -> Result<(), PyErr> {
-        let seq_a = String::from("ATG");
-        let seq_b = String::from("TAA");
-
-        let adapters = Adapters::new(seq_a, seq_b)?;
-        assert_eq!(adapters.prefix, b"ATG");
-        assert_eq!(adapters.suffix, b"TAA");
-
-        Ok(())
-    }
+    const MATCH_SCORE: i32 = 3;
+    const MISMATCH_SCORE: i32 = -2;
+    const GAP_OPEN_PENALTY: i32 = 5;
+    const GAP_EXTEND_PENALTY: i32 = 2;
+    const ACCEPT_ALIGNMENT: f64 = 0.75;
 
     #[test]
     fn test_good_prefix_alignment() {
@@ -331,23 +290,15 @@ mod tests {
 
     /// helper fn to test alignments
     fn _test_alignment_helper(query: &[u8], template: &[u8], pass: bool) {
-        let align_params = AlignParams::default();
-        let accept_align_score = align_params.accept_prefix_alignment
-            * align_params.match_score as f64
-            * query.len() as f64;
+        let min_align_score = ACCEPT_ALIGNMENT * MATCH_SCORE as f64 * query.len() as f64;
 
-        let scoring_matrix = Matrix::create(
-            b"ACTG",
-            align_params.match_score,
-            align_params.mismatch_score,
-        )
-        .unwrap();
+        let scoring_matrix = Matrix::create(b"ACTG", MATCH_SCORE, MISMATCH_SCORE).unwrap();
 
         let profile = Profile::new(query, true, &scoring_matrix).unwrap();
         let aligner = Aligner::new()
             .profile(profile)
-            .gap_open(align_params.gap_open_penalty)
-            .gap_extend(align_params.gap_extend_penalty)
+            .gap_open(GAP_OPEN_PENALTY)
+            .gap_extend(GAP_EXTEND_PENALTY)
             .semi_global()
             .scan()
             .use_stats()
@@ -356,9 +307,9 @@ mod tests {
         let alignment = aligner.align(None, template).unwrap();
         let score = alignment.get_score();
         if pass {
-            assert!(score as f64 > accept_align_score);
+            assert!(score as f64 > min_align_score);
         } else {
-            assert!(accept_align_score > score as f64);
+            assert!(min_align_score > score as f64);
         }
     }
 }
