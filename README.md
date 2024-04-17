@@ -21,15 +21,8 @@ The workflow can be described generally by these steps:
 2. for each fastq read, search for exact matches of these adapters.
 3. in case of no exact match for either adapter, perform a semi-global alignment of
 the adapter sequence on the fastq read.
-4. if the alignment is produces a score that is above a set threshold, recover the variable region.
+4. if the alignment is acceptable, recover the variable region.
 To adjust the thresholds for accepting alignments, see the [alignment parameters](#using-custom-alignment-parameters) section
-
-Alignments are accepted if they produce a score above a set threshold.
-These thresholds correspond to the fraction of the max theoretical alignment score
-that can be produced from a given adapter sequence and fastq read. Thus, thresholds
-are values between 0 and 1. By default, thresholds for both adapter sequences are
-set to 0.75. In some cases, you may want to change these values to be more or less
-stringent. 
 
 > [!WARNING]
 > Note that vFind doesn't do any kind of fastq preprocessing. For initial quality
@@ -41,7 +34,7 @@ stringent.
 
 ### PyPI (Recommended for most)
 
-vFind is available on [PyPI](https://pypi.org/) and can be installed via pip (or alternatives like
+vFind is available on [PyPI](https://pypi.org/project/vfind/0.1.0/) and can be installed via pip (or alternatives like
 [uv](https://github.com/astral-sh/uv)).
 
 Below is an example using pip with Python3 in a new project.
@@ -135,16 +128,14 @@ variants = find_variants(
 )
 ```
 
-Only alignments that produce scores meeting a threshold will be considered accepted. 
-The threshold for considering an acceptable alignment can be adjusted with the
-`accept_prefix_alignment` and `accept_suffix_alignment` arguments. By default,
-both thresholds are set to 0.75.
+Alignments are accepted if they produce a score above a set threshold. The threshold
+for considering an acceptable alignment can be adjusted with the `accept_prefix_alignment`
+and `accept_suffix_alignment` arguments. By default, both thresholds are set to 0.75.
 
 The thresholds represent a fraction of the maximum alignment score. So, a value of 0.75
 means alignments producing scores that are greater than 75% the maximum theoretical score
-will be accepted.
-
-Either an exact match or partial match (accepted alignment) must be made for both adapter sequences to recover a variant. 
+will be accepted. If an alignment produces a score below the threshold, it will
+not be accepted and no sequence will be recovered from that given read.
 
 ### Miscellaneous
 
