@@ -1,0 +1,73 @@
+name: python-release
+on:
+  pull_request:
+    branches:
+      - main
+    tags:
+      - '*'
+  workflow_dispatch:
+permissions:
+  content: read
+jobs:
+  linux:
+    runs-on: ${{ matrix.platform.runner }}
+    strategy:
+      matrix:
+        platform:
+          - runner: ubuntu-latest
+            target: x86_64
+          - runner: ubuntu-latest
+            target: aarch64 
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v26
+      - uses: cachix/cachix-action@v14
+      - name: Setup build environment
+        shell: bash
+        run: nix develop --impure
+      - name: Build wheels
+        shell: bash
+        run: |
+          maturin build --release --out dist --find-interpreter
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-linux-${{ matrix.platform.target }}
+          path: dist
+      - name: pytest x86_64
+        if: ${{ startsWith(matrix.platform.target, 'x86_64') }}
+        shell: bash
+        run: |
+          pip install vfind --find-links dist --force-reinstall
+          pytest
+  # sdist:
+  #   runs-on: ubuntu-latest
+  #   steps: 
+  #     - uses: actions/checkout@v4
+  #     - uses: cachix/install-nix-action@v26
+  #     - uses: cachix/cachix-action@v14
+  #     - name: Setup build environment
+  #       shell: bash
+  #       run: nix develop --impure
+  #     - name: Build sdist
+  #       shell: bash
+  #       run: maturin sdist --out dist
+  #     - name: Upload sdist
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: wheels-sdist
+  #         path: dist
+  # release:
+  #   name: Release
+  #   runs-on: ubuntu-latest
+  #   if: "startsWith(github.ref, 'refs/tags')"
+  #   needs: [linux, sdist]
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       name: Publish to PyPI
+  #       shell: bash
+  #       run: maturin upload --non-interactive --skip-existing wheels-*/*
+    
+
+
+  
