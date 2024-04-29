@@ -1,14 +1,15 @@
 use flate2::read::GzDecoder;
+use indicatif::{ProgressBar, ProgressStyle};
 use memchr::memmem;
 use parasail_rs::{Aligner, Matrix, Profile};
+use pyo3::{exceptions::PyIOError, prelude::*};
 use pyo3_polars::PyDataFrame;
 use seq_io::fastq::{Reader, Record};
 use seq_io::parallel::parallel_fastq;
 use std::collections::HashMap;
 use std::io::Read;
+use std::time::Duration;
 use std::{fs::File, path::Path};
-
-use pyo3::{exceptions::PyIOError, prelude::*};
 
 /// Translate a DNA sequence to an amino acid sequence
 pub fn translate(seq: &[u8]) -> String {
@@ -201,6 +202,11 @@ pub fn find_variants(
 
     let mut variants: HashMap<String, u32> = HashMap::new();
 
+    let pb = ProgressBar::new_spinner();
+    pb.enable_steady_tick(Duration::from_millis(100));
+    pb.set_style(ProgressStyle::with_template("{spinner:.blue} {msg}").unwrap());
+    pb.set_message(format!("Processing {}...", fq_path.display()));
+
     parallel_fastq(
         reader,
         n_threads,
@@ -229,6 +235,8 @@ pub fn find_variants(
         },
     )
     .unwrap();
+
+    pb.finish_with_message("Variant search completed.");
 
     let df = polars::df!(
         "sequence" => variants.keys().cloned().collect::<Vec<String>>(),

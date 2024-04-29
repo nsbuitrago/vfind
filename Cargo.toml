@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 fastq = "0.6.0"
 flate2 = "1.0.28"
+indicatif = { version = "0.17.8", features = ["rayon"] }
 memchr = "2.7.2"
 parasail-rs = "0.7.0"
 polars = "0.38.3"
