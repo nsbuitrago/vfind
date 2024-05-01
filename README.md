@@ -19,23 +19,23 @@ The workflow can be described generally by these steps:
 
 1. define a set of constant adapter sequences that immediately flank a variable region of interest.
 2. for each fastq read, search for exact matches of these adapters.
+3. For exact matches of both adapters, recover the variable region.
 3. in case of no exact match for either adapter, perform a semi-global alignment of
-the adapter sequence on the fastq read.
+the adapter sequence on the fastq read (optional, see the [alignment parameters](#using-custom-alignment-parameters) section).
 4. if the alignment is produces a score that is above a set threshold, recover the variable region.
 To adjust the thresholds for accepting alignments, see the [alignment parameters](#using-custom-alignment-parameters) section
-
-Alignments are accepted if they produce a score above a set threshold.
-These thresholds correspond to the fraction of the max theoretical alignment score
-that can be produced from a given adapter sequence and fastq read. Thus, thresholds
-are values between 0 and 1. By default, thresholds for both adapter sequences are
-set to 0.75. In some cases, you may want to change these values to be more or less
-stringent. 
+5. translate the variable region to an amino acid sequence (optional, see the [miscellaneous](#miscellaneous) section).
+Note that the translation is done in-frame and assumes the sequence is a coding sequence.
 
 > [!WARNING]
-> Note that vFind doesn't do any kind of fastq preprocessing. For initial quality
+> Note that vFind doesn't do any kind of preprocessing. For initial quality
 > filtering, merging, and other common preprocessing operations, you might be
-> interested in something like [fastp]() or [ngmerge](). We generally recommend
-> using fastp for quality filtering and merging fastq files before using vFind.
+> interested in something like [fastp](https://github.com/OpenGene/fastp) or
+> [ngmerge](https://github.com/jsh58/NGmerge). We generally recommend using
+> fastp for quality filtering and merging fastq files before using vFind.
+
+Installation details and usage examples are given below. For more usage details,
+please see the [API reference](docs/api-reference.md)
 
 ## Installation
 
@@ -57,12 +57,13 @@ python3 -m pip install vfind # install vfind
 ### Nix
 
 vFind is also available as a Python package on [NixPkgs](https://search.nixos.org/packages?). You can declare new
-development enviroments using [nix flakes](https://wiki.nixos.org/wiki/Flakes).
+enviroments using [nix flakes](https://wiki.nixos.org/wiki/Flakes).
 
-For something quick, you can use nix-shell,
+For something quick, you can use nix-shell. For example, the following will
+create a new shell with Python 3.11, vFind, and polars installed.
 
 ```bash
-nix-shell -p python311 python3Packages.vfind
+nix-shell -p python311 python3Packages.vfind python3Packages.polars
 ```
 
 ## Examples
@@ -73,8 +74,8 @@ nix-shell -p python311 python3Packages.vfind
 from vfind import find_variants
 import polars as pl # variants are returned in a polars dataframe
 
-adapters = ("GGG", "CCC") # define the Adapters
-fq_path = "./path/to/your/fastq/file.fq.gz" # path fo fq file
+adapters = ("GGG", "CCC") # define the adapters
+fq_path = "./path/to/your/fastq/file.fq.gz" # path to fq file
 
 # now, let's find some variants
 variants = find_variants(fq_path, adapters)
@@ -116,8 +117,11 @@ By default, vFind uses semi-global alignment with the following parameters:
 - gap open penalty = 5
 - gap extend penalty = 2
 
-Note that the gap penalties are represented as positive integers. This is largely due to the underlying
-alignment library.
+Note that the gap penalties are represented as positive integers. This is largely due to how the underlying
+alignment library works.
+
+To adjust these alignment parameters, use the `match_score`, `mismatch_score`,
+`gap_open_penalty`, and `gap_extend_penalty` keyword arguments:
 
 ```python
 from vfind import find_variants
@@ -145,6 +149,7 @@ means alignments producing scores that are greater than 75% the maximum theoreti
 will be accepted.
 
 Either an exact match or partial match (accepted alignment) must be made for both adapter sequences to recover a variant. 
+In order to skip alignment and only look for exact matches, set the `skip_alignment` argument to `True`.
 
 ### Miscellaneous
 
@@ -174,46 +179,13 @@ dna_seqs = find_variants(fq_path, adapters, skip_translation=True)
 variants = find_variants(fq_path, adapters, n_threads=6, queue_len=4)
 ```
 
+For more usage details, see the [API reference](docs/api-reference.md).
+
 ## Contributing
 
-Contributions are welcome. Please submit an issue or pull request for any bugs,
-suggestions, or feedback.
-
-### Developing
-
-vFind is written in Rust and uses [PyO3](https://pyo3.rs/v0.21.1/) and [Maturin](https://github.com/PyO3/maturin)
-to generate the Python module. To get started, you will need to have the
-[rust toolchain](https://www.rust-lang.org/tools/install) and [Python >= 3.10](https://www.python.org/downloads/).
-
-Below are some general steps to get up and running. Note that these examples
-use [uv]). However, you could do this with standard pip or your preferred method.
-
-1. clone the repository to your machine
-
-```bash
-git clone git@github.com:nsbuitrago/vfind.git
-cd vfind
-```
-
-2. Create a new Python virtual environment and install dev dependencies.
-
-```bash
-uv venv
-source .venv/bin/activate
-
-# this will intsall maturin, polars, and any other required packages.
-uv pip install -r dev-requirements.txt
-```
-
-3. Build and install the vFind package in your virtual environment with maturin. 
-
-```bash
-# in the root project directory
-maturin develop
-```
-
-4. From here, you can make changes to the Rust lib and run `maturin` develop
-to rebuild the package with those changes.
+Feedback is a gift and contributions are more than welcome. Please submit an
+issue or pull request for any bugs, suggestions, or feedback. Please see the 
+[developing](docs/developing) guide for more details on how to work on vFind.
 
 ## License
 

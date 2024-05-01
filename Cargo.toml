@@ -9,12 +9,13 @@ name = "vfind"
 crate-type = ["cdylib"]
 
 [dependencies]
-fastq = "0.6.0"
 flate2 = "1.0.28"
 indicatif = { version = "0.17.8", features = ["rayon"] }
+log = "0.4.21"
 memchr = "2.7.2"
 parasail-rs = "0.7.0"
-polars = "0.38.3"
-pyo3 = "0.20.0"
-pyo3-polars = "0.12.0"
+polars = "0.39.2"
+pyo3 = "0.21.2"
+pyo3-log = "0.10.0"
+pyo3-polars = "0.13.0"
 seq_io = "0.3.2"

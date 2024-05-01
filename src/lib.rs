@@ -1,14 +1,16 @@
 use flate2::read::GzDecoder;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressState, ProgressStyle};
+use log::warn;
 use memchr::memmem;
 use parasail_rs::{Aligner, Matrix, Profile};
-use pyo3::{exceptions::PyIOError, prelude::*};
+use polars::prelude::*;
+use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 use seq_io::fastq::{Reader, Record};
 use seq_io::parallel::parallel_fastq;
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::io::Read;
-use std::time::Duration;
 use std::{fs::File, path::Path};
 
 /// Translate a DNA sequence to an amino acid sequence
@@ -114,6 +116,7 @@ fn find_adapter_match(
     aligner: &Aligner,
     min_align_score: f64,
     is_prefix: bool,
+    skip_alignment: bool,
 ) -> Option<usize> {
     let adapter_match = {
         let exact_match = memmem::find(seq, adapter);
@@ -123,6 +126,10 @@ fn find_adapter_match(
                 false => Some(exact_match),
             }
         } else {
+            if skip_alignment {
+                return None;
+            }
+
             let alignment = aligner.align(None, seq).unwrap();
             let score = alignment.get_score();
             if score as f64 > min_align_score {
@@ -151,7 +158,9 @@ fn find_adapter_match(
     accept_suffix_alignment=0.75,
     n_threads=3,
     queue_len=2,
-    skip_translation=false
+    skip_translation=false,
+    skip_alignment=false,
+    show_progress=true,
 ))]
 pub fn find_variants(
     fq_path: String,
@@ -165,12 +174,10 @@ pub fn find_variants(
     n_threads: u32,
     queue_len: usize,
     skip_translation: bool,
+    skip_alignment: bool,
+    show_progress: bool,
 ) -> PyResult<PyDataFrame> {
     let fq_path = Path::new(&fq_path);
-    if !fq_path.exists() {
-        return Err(PyIOError::new_err("File {} does not exist."));
-    }
-
     let fq_file = File::open(fq_path)?;
     let mut decoder = GzDecoder::new(&fq_file);
     let mut data = Vec::new();
@@ -202,23 +209,51 @@ pub fn find_variants(
 
     let mut variants: HashMap<String, u32> = HashMap::new();
 
-    let pb = ProgressBar::new_spinner();
-    pb.enable_steady_tick(Duration::from_millis(100));
-    pb.set_style(ProgressStyle::with_template("{spinner:.blue} {msg}").unwrap());
-    pb.set_message(format!("Processing {}...", fq_path.display()));
+    let pb = if show_progress {
+        let pb = ProgressBar::new(data.len() as u64);
+        pb.set_style(ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+            .unwrap()
+            .with_key("eta", |state: &ProgressState, w: &mut dyn Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap())
+            .progress_chars("#>-"));
+        pb
+    } else {
+        let pb = ProgressBar::hidden();
+        pb
+    };
 
     parallel_fastq(
         reader,
         n_threads,
         queue_len,
         |record, variant| {
+            // find variable region in the read
             let seq = record.seq();
-            let start = find_adapter_match(seq, prefix, &prefix_aligner, min_prefix_score, true);
-            let end = find_adapter_match(seq, suffix, &suffix_aligner, min_suffix_score, false);
+            let start = find_adapter_match(
+                seq,
+                &prefix,
+                &prefix_aligner,
+                min_prefix_score,
+                true,
+                skip_alignment,
+            );
+            let end = find_adapter_match(
+                seq,
+                &suffix,
+                &suffix_aligner,
+                min_suffix_score,
+                false,
+                skip_alignment,
+            );
 
             if start.is_some() && end.is_some() && start.unwrap() < end.unwrap() {
                 *variant = Some(seq[start.unwrap()..end.unwrap()].to_vec());
             }
+
+            // determine number of bytes read and update progress
+            let (id, desc) = record.id_desc_bytes();
+            let n_bytes =
+                record.seq().len() + record.qual().len() + id.len() + desc.unwrap_or(&[]).len();
+            pb.inc(n_bytes as u64);
         },
         |_, variant| {
             if let Some(variant) = variant {
@@ -230,15 +265,14 @@ pub fn find_variants(
                     *variants.entry(translate(variant)).or_insert(0) += 1;
                 }
             }
-
             None::<()>
         },
     )
     .unwrap();
 
-    pb.finish_with_message("Variant search completed.");
+    pb.finish_and_clear();
 
-    let df = polars::df!(
+    let df = df!(
         "sequence" => variants.keys().cloned().collect::<Vec<String>>(),
         "count" => variants.values().cloned().collect::<Vec<u32>>(),
     )
@@ -249,7 +283,8 @@ pub fn find_variants(
 
 /// vFind Python module
 #[pymodule]
-fn vfind(_py: Python, m: &PyModule) -> PyResult<()> {
+fn vfind(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    pyo3_log::init();
     m.add_function(wrap_pyfunction!(find_variants, m)?)?;
     Ok(())
 }
