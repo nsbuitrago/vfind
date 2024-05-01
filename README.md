@@ -1,5 +1,7 @@
 # vFind
 
+[![PyPI - Version](https://img.shields.io/pypi/v/vfind)](https://pypi.org/project/vfind/)
+
 *A simple variant finder for NGS data.*
 
 1. [Introduction](#introduction)
@@ -41,7 +43,7 @@ please see the [API reference](docs/api-reference.md)
 
 ### PyPI (Recommended for most)
 
-vFind is available on [PyPI](https://pypi.org/) and can be installed via pip (or alternatives like
+vFind is available on [PyPI](https://pypi.org/project/vfind) and can be installed via pip (or alternatives like
 [uv](https://github.com/astral-sh/uv)).
 
 Below is an example using pip with Python3 in a new project.
@@ -100,7 +102,7 @@ print(variants.head(5)) # print the first 5 (most frequent) variants
 # also any sequences that have a pre-mature stop codon (i.e., * before the last residue)
 
 filtered_variants = variants.filter(
-    ~variants["counts"] < 10,
+    variants["counts"] > 10,
     ~variants["sequence"][::-2].str.contains("*")
 )
 
@@ -170,9 +172,9 @@ dna_seqs = find_variants(fq_path, adapters, skip_translation=True)
 
 ---
 
-**Q:** `find_variants` is slow. Is there anything I can do to speed it up?
+**Q:** I have a lot of data and `find_variants` is slow. Is there anything I can do to speed it up?
 
-**A:** Maybe? Try changing the number of threads or queue length the function uses.
+**A:** Maybe. Try changing the number of threads or queue length the function uses.
 
 ```python
 # ...

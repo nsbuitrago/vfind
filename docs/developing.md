@@ -37,9 +37,9 @@ to rebuild the package and install it in your virtual environment.
 
 ## Using the supplied flake.nix
 
-For those that are familiar with [flakes](), there is a provided [flake.nix](/flake.nix)
-that uses [devenv]() to setup a development environment with all the necessary
-tools installed. To get started, make sure you have [Nix]() installed and have
+For those that are familiar with [flakes](https://wiki.nixos.org/wiki/Flakes), there is a provided [flake.nix](/flake.nix)
+that uses [devenv](https://devenv.sh) to setup a development environment with all the necessary
+tools installed. To get started, make sure you have [Nix](https://nixos.org/download/) installed and have
 enabled `nix-commands` and `flakes`.
 
 To create a new shell with development tools, run `nix develop --impure`. This
@@ -47,5 +47,4 @@ may take some time on the first run since it will need to build the tools.
 
 Once in the development shell, you can run continue with the previous steps
 to make necessary changes and build the Python package.
-
 

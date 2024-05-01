@@ -19,7 +19,7 @@ class TestFinder(unittest.TestCase):
         variants = find_variants(
             "test_data/toy.fq.gz",
             ("GGGCCCAGCCGGCCGGAT", "CCGGAGGCGGAGGTTCAG"),
-            show_progress=True,
+            show_progress=False,
         )
         ground_truth = pl.read_csv("test_data/ground_truth.csv")
 
