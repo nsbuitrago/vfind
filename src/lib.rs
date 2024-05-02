@@ -4,6 +4,7 @@ use log::warn;
 use memchr::memmem;
 use parasail_rs::{Aligner, Matrix, Profile};
 use polars::prelude::*;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 use seq_io::fastq::{Reader, Record};
@@ -220,7 +221,7 @@ pub fn find_variants(
     let min_prefix_score = accept_prefix_alignment * match_score as f64 * prefix.len() as f64;
     let min_suffix_score = accept_suffix_alignment * match_score as f64 * suffix.len() as f64;
 
-    let mut variants: HashMap<String, u32> = HashMap::new();
+    let mut variants: HashMap<String, u64> = HashMap::new();
 
     let pb = if show_progress {
         let pb = ProgressBar::new(data.len() as u64);
@@ -289,13 +290,12 @@ pub fn find_variants(
 
     pb.finish_and_clear();
 
-    // FIXME:
-    // there has to be a better way to do this
+    let (seq, count): (Vec<String>, Vec<u64>) = variants.into_iter().unzip();
     let df = df!(
-        "sequence" => variants.keys().cloned().collect::<Vec<String>>(),
-        "count" => variants.values().cloned().collect::<Vec<u32>>(),
+        "sequence" => seq,
+        "count" => count,
     )
-    .unwrap();
+    .map_err(|e| PyValueError::new_err(format!("Error creating DataFrame: {}", e)))?;
 
     Ok(PyDataFrame(df))
 }
