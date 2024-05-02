@@ -1,6 +1,5 @@
 use flate2::read::GzDecoder;
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
-use log::warn;
 use memchr::memmem;
 use parasail_rs::{Aligner, Matrix, Profile};
 use polars::prelude::*;
@@ -14,11 +13,13 @@ use std::fmt::Write;
 use std::io::Read;
 use std::{fs::File, path::Path};
 
-/// Translate a DNA sequence to an amino acid sequence
+/// Attempt to translate a DNA sequence to an amino acid sequence. If the sequence
+/// length is not divisible by 3, the None variant is returned.
 pub fn translate(seq: &[u8]) -> Option<String> {
     if seq.len() % 3 != 0 {
         return None;
     }
+
     let mut peptide = String::with_capacity(seq.len() / 3);
 
     'outer: for triplet in seq.chunks_exact(3) {
@@ -95,16 +96,19 @@ static ASCII_TO_INDEX: [usize; 128] = [
     4, 4, 4, 4, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, // 112-127  (116 = t, 117 = u)
 ];
 
-/// Get adapter aligner
+/// Construct and return aligner with an adapter profile.
 fn get_aligner(
-    prefix: &[u8],
+    adapter: &[u8],
     scoring_matrix: &Matrix,
     gap_open_penalty: i32,
     gap_extend_penalty: i32,
 ) -> Aligner {
-    let prefix_profile = Profile::new(prefix, true, scoring_matrix).unwrap();
+    let adapter_profile = Profile::new(adapter, true, scoring_matrix)
+        .map_err(|e| PyValueError::new_err(format!("Error creating profile for adapter: {}", e)))
+        .unwrap();
+
     Aligner::new()
-        .profile(prefix_profile)
+        .profile(adapter_profile)
         .gap_open(gap_open_penalty)
         .gap_extend(gap_extend_penalty)
         .semi_global()
@@ -122,32 +126,28 @@ fn find_adapter_match(
     is_prefix: bool,
     skip_alignment: bool,
 ) -> Option<usize> {
-    let adapter_match = {
-        let exact_match = memmem::find(seq, adapter);
-        if let Some(exact_match) = exact_match {
+    let exact_match = memmem::find(seq, adapter);
+    if let Some(exact_match) = exact_match {
+        match is_prefix {
+            true => Some(exact_match + adapter.len()),
+            false => Some(exact_match),
+        }
+    } else {
+        if skip_alignment {
+            return None;
+        }
+
+        let alignment = aligner.align(None, seq).unwrap();
+        let score = alignment.get_score();
+        if score as f64 > min_align_score {
             match is_prefix {
-                true => Some(exact_match + adapter.len()),
-                false => Some(exact_match),
+                true => Some(alignment.get_length().unwrap() as usize),
+                false => Some(seq.len() - alignment.get_length().unwrap() as usize),
             }
         } else {
-            if skip_alignment {
-                return None;
-            }
-
-            let alignment = aligner.align(None, seq).unwrap();
-            let score = alignment.get_score();
-            if score as f64 > min_align_score {
-                match is_prefix {
-                    true => Some(alignment.get_length().unwrap() as usize),
-                    false => Some(seq.len() - alignment.get_length().unwrap() as usize),
-                }
-            } else {
-                None
-            }
+            None
         }
-    };
-
-    adapter_match
+    }
 }
 
 #[pyfunction]
@@ -166,6 +166,25 @@ fn find_adapter_match(
     skip_alignment=false,
     show_progress=true,
 ))]
+/// Find variable regions flanked by adapters in a FASTQ dataset.
+///
+/// Args:
+///     fq_path (str): Path to FASTQ file
+///     adapters (tuple(str, str)): Tuple of prefix and suffix adapters
+///     match_score (int): Match score for alignment (default = 3)
+///     mismatch_score (int): Mismatch score for alignment (default = -2)
+///     gap_open_penalty (int): Gap open penalty for alignment (default = 5)
+///     gap_extend_penalty (int): Gap extend penalty for alignment (default = 2)
+///     accept_prefix_alignment (float): Threshold for accepting prefix alignment (default = 0.75)
+///     accept_suffix_alignment (float): Threshold for accepting suffix alignment (default = 0.75)
+///     n_threads (int): Number of threads (default = 3)
+///     queue_len (int): Queue length (default = 2)
+///     skip_translation (bool): Skip translation (default = False)
+///     skip_alignment (bool): Skip alignments (default = False)
+///     show_progress (bool): Show progress bar (default = True)
+///
+/// Returns:
+///     polars.DataFrame: dataframe with columns 'sequence' and 'count'
 pub fn find_variants(
     fq_path: String,
     adapters: (String, String),
@@ -181,14 +200,23 @@ pub fn find_variants(
     skip_alignment: bool,
     show_progress: bool,
 ) -> PyResult<PyDataFrame> {
-    assert!(accept_prefix_alignment > 0.0 && accept_prefix_alignment <= 1.0);
+    if accept_prefix_alignment > 1.0 || accept_prefix_alignment <= 0.0 {
+        return Err(PyValueError::new_err(
+            "accept_prefix_alignment must be between 0 and 1",
+        ));
+    }
+
+    if accept_suffix_alignment > 1.0 || accept_suffix_alignment <= 0.0 {
+        return Err(PyValueError::new_err(
+            "accept_suffix_alignment must be between 0 and 1",
+        ));
+    }
+
     assert!(accept_suffix_alignment > 0.0 && accept_suffix_alignment <= 1.0);
     if accept_prefix_alignment == 1.0 && accept_suffix_alignment == 1.0 {
-        warn!(
-            "Both accept_prefix_alignment and accept_suffix_alignment are set to 
-            1.0. This will result in only accepting exact matches of adapters.
-            Set skip_alignment=True if this is the intended behavior."
-        );
+        return Err(PyValueError::new_err(
+            "Both accept_prefix_alignment and accept_suffix_alignment are set to 1.0. This will result in only accepting exact matches of adapters. Set skip_alignment=True if this is the intended behavior.",
+        ));
     }
 
     let fq_path = Path::new(&fq_path);
@@ -203,7 +231,7 @@ pub fn find_variants(
 
     let prefix = adapters.0.as_bytes();
     let prefix_aligner = get_aligner(
-        &prefix,
+        prefix,
         &scoring_matrix,
         gap_open_penalty,
         gap_extend_penalty,
@@ -211,7 +239,7 @@ pub fn find_variants(
 
     let suffix = adapters.1.as_bytes();
     let suffix_aligner = get_aligner(
-        &suffix,
+        suffix,
         &scoring_matrix,
         gap_open_penalty,
         gap_extend_penalty,
@@ -231,8 +259,7 @@ pub fn find_variants(
             .progress_chars("#>-"));
         pb
     } else {
-        let pb = ProgressBar::hidden();
-        pb
+        ProgressBar::hidden()
     };
     pb.set_message(format!("Processing {}", fq_path.display()));
 
@@ -245,7 +272,7 @@ pub fn find_variants(
             let seq = record.seq();
             let start = find_adapter_match(
                 seq,
-                &prefix,
+                prefix,
                 &prefix_aligner,
                 min_prefix_score,
                 true,
@@ -253,7 +280,7 @@ pub fn find_variants(
             );
             let end = find_adapter_match(
                 seq,
-                &suffix,
+                suffix,
                 &suffix_aligner,
                 min_suffix_score,
                 false,
@@ -273,12 +300,12 @@ pub fn find_variants(
         |_, variant| {
             if let Some(variant) = variant {
                 if skip_translation {
-                    if let Some(variant) = String::from_utf8(variant.to_vec()).ok() {
+                    if let Ok(variant) = String::from_utf8(variant.to_vec()) {
                         *variants.entry(variant).or_insert(0) += 1;
                     }
                 } else {
                     // Attempt to translate and add to variants
-                    if let Some(variant) = translate(&variant) {
+                    if let Some(variant) = translate(variant) {
                         *variants.entry(variant).or_insert(0) += 1;
                     }
                 }
@@ -303,7 +330,6 @@ pub fn find_variants(
 /// vFind Python module
 #[pymodule]
 fn vfind(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    pyo3_log::init();
     m.add_function(wrap_pyfunction!(find_variants, m)?)?;
     Ok(())
 }

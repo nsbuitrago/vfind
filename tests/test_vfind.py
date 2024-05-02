@@ -10,12 +10,6 @@ class TestFinder(unittest.TestCase):
     """
 
     def test_vfind(self):
-        FORMAT = (
-            "%(levelname)s %(name)s %(asctime)-15s %(filename)s:%(lineno)d %(message)s"
-        )
-        logging.basicConfig(format=FORMAT)
-        logging.getLogger().setLevel(logging.WARN)
-
         variants = find_variants(
             "test_data/toy.fq.gz",
             ("GGGCCCAGCCGGCCGGAT", "CCGGAGGCGGAGGTTCAG"),

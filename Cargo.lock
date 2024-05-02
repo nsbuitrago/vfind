@@ -52,12 +52,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arc-swap"
-version = "1.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
-
-[[package]]
 name = "argminmax"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1311,17 +1305,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pyo3-log"
-version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2af49834b8d2ecd555177e63b273b708dea75150abc6f5341d0a6e1a9623976c"
-dependencies = [
- "arc-swap",
- "log",
- "pyo3",
-]
-
-[[package]]
 name = "pyo3-macros"
 version = "0.21.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1831,7 +1814,6 @@ dependencies = [
  "parasail-rs",
  "polars",
  "pyo3",
- "pyo3-log",
  "pyo3-polars",
  "seq_io",
 ]
