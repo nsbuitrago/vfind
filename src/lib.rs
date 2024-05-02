@@ -14,7 +14,10 @@ use std::io::Read;
 use std::{fs::File, path::Path};
 
 /// Translate a DNA sequence to an amino acid sequence
-pub fn translate(seq: &[u8]) -> String {
+pub fn translate(seq: &[u8]) -> Option<String> {
+    if seq.len() % 3 != 0 {
+        return None;
+    }
     let mut peptide = String::with_capacity(seq.len() / 3);
 
     'outer: for triplet in seq.chunks_exact(3) {
@@ -37,7 +40,7 @@ pub fn translate(seq: &[u8]) -> String {
 
         peptide.push(amino_acid);
     }
-    peptide
+    Some(peptide)
 }
 
 /// https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi
@@ -177,6 +180,16 @@ pub fn find_variants(
     skip_alignment: bool,
     show_progress: bool,
 ) -> PyResult<PyDataFrame> {
+    assert!(accept_prefix_alignment > 0.0 && accept_prefix_alignment <= 1.0);
+    assert!(accept_suffix_alignment > 0.0 && accept_suffix_alignment <= 1.0);
+    if accept_prefix_alignment == 1.0 && accept_suffix_alignment == 1.0 {
+        warn!(
+            "Both accept_prefix_alignment and accept_suffix_alignment are set to 
+            1.0. This will result in only accepting exact matches of adapters.
+            Set skip_alignment=True if this is the intended behavior."
+        );
+    }
+
     let fq_path = Path::new(&fq_path);
     let fq_file = File::open(fq_path)?;
     let mut decoder = GzDecoder::new(&fq_file);
@@ -211,7 +224,7 @@ pub fn find_variants(
 
     let pb = if show_progress {
         let pb = ProgressBar::new(data.len() as u64);
-        pb.set_style(ProgressStyle::with_template("{spinner:.green} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+        pb.set_style(ProgressStyle::with_template("{spinner:.green} {msg} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
             .unwrap()
             .with_key("eta", |state: &ProgressState, w: &mut dyn Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap())
             .progress_chars("#>-"));
@@ -220,6 +233,7 @@ pub fn find_variants(
         let pb = ProgressBar::hidden();
         pb
     };
+    pb.set_message(format!("Processing {}", fq_path.display()));
 
     parallel_fastq(
         reader,
@@ -258,11 +272,14 @@ pub fn find_variants(
         |_, variant| {
             if let Some(variant) = variant {
                 if skip_translation {
-                    let variant = String::from_utf8(variant.to_vec()).unwrap();
-                    *variants.entry(variant).or_insert(0) += 1;
+                    if let Some(variant) = String::from_utf8(variant.to_vec()).ok() {
+                        *variants.entry(variant).or_insert(0) += 1;
+                    }
                 } else {
-                    // translate and add to variants
-                    *variants.entry(translate(variant)).or_insert(0) += 1;
+                    // Attempt to translate and add to variants
+                    if let Some(variant) = translate(&variant) {
+                        *variants.entry(variant).or_insert(0) += 1;
+                    }
                 }
             }
             None::<()>
@@ -272,6 +289,8 @@ pub fn find_variants(
 
     pb.finish_and_clear();
 
+    // FIXME:
+    // there has to be a better way to do this
     let df = df!(
         "sequence" => variants.keys().cloned().collect::<Vec<String>>(),
         "count" => variants.values().cloned().collect::<Vec<u32>>(),

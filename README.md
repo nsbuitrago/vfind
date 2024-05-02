@@ -17,17 +17,16 @@ It is actually using a simpler algorithm which is *usually* sufficient for
 screening experiments. The main use case is finding variants from a library that
 has constant adapter sequences flanking a variable region.
 
-The workflow can be described generally by these steps:
+This simple algorithm is summarized as:
 
-1. define a set of constant adapter sequences that immediately flank a variable region of interest.
-2. for each fastq read, search for exact matches of these adapters.
-3. For exact matches of both adapters, recover the variable region.
-3. in case of no exact match for either adapter, perform a semi-global alignment of
-the adapter sequence on the fastq read (optional, see the [alignment parameters](#using-custom-alignment-parameters) section).
-4. if the alignment is produces a score that is above a set threshold, recover the variable region.
-To adjust the thresholds for accepting alignments, see the [alignment parameters](#using-custom-alignment-parameters) section
-5. translate the variable region to an amino acid sequence (optional, see the [miscellaneous](#miscellaneous) section).
-Note that the translation is done in-frame and assumes the sequence is a coding sequence.
+1. Define a pair of adapter sequences that flank the variable region.
+2. For each fastq read, search for exact matches of these adapters.
+3. If both adapters are found exactly, recover the variable region.
+4. For each adapter without an exact match, perform semi-global alignment between the given adapter and read (optional see the [alignment parameters](#using-custom-alignment-parameters) section).
+5. If the alignment score meets a set threshold, that adapter is considered to match.
+6. If both adapters are exactly or partially matched, recover the variable region.
+7. For exact matches of both adapters, recover the variable region. Otherwise, continue to the next read.
+8. Finally, translate the variable region to its amino acid sequence and filter out any sequences with partial codons (Optional, see the [miscellaneuous](#miscellaneuous) section).
 
 > [!WARNING]
 > Note that vFind doesn't do any kind of preprocessing. For initial quality
@@ -41,9 +40,12 @@ please see the [API reference](docs/api-reference.md)
 
 ## Installation
 
+vFind is a Python package and can be installed via pip or nix. For a CLI version,
+see the [vFind-cli](https://github.com/nsbuitrago/vfind-cli) repository.
+
 ### PyPI (Recommended for most)
 
-vFind is available on [PyPI](https://pypi.org/project/vfind) and can be installed via pip (or alternatives like
+The package is available on [PyPI](https://pypi.org/project/vfind) and can be installed via pip (or alternatives like
 [uv](https://github.com/astral-sh/uv)).
 
 Below is an example using pip with Python3 in a new project.
@@ -58,7 +60,7 @@ python3 -m pip install vfind # install vfind
 
 ### Nix
 
-vFind is also available as a Python package on [NixPkgs](https://search.nixos.org/packages?). You can declare new
+vFind is also available on [NixPkgs](https://search.nixos.org/packages?). You can declare new
 enviroments using [nix flakes](https://wiki.nixos.org/wiki/Flakes).
 
 For something quick, you can use nix-shell. For example, the following will
@@ -79,7 +81,6 @@ import polars as pl # variants are returned in a polars dataframe
 adapters = ("GGG", "CCC") # define the adapters
 fq_path = "./path/to/your/fastq/file.fq.gz" # path to fq file
 
-# now, let's find some variants
 variants = find_variants(fq_path, adapters)
 
 # print the number of unique sequences 
@@ -102,7 +103,7 @@ print(variants.head(5)) # print the first 5 (most frequent) variants
 # also any sequences that have a pre-mature stop codon (i.e., * before the last residue)
 
 filtered_variants = variants.filter(
-    variants["counts"] > 10,
+    variants["count"] > 10,
     ~variants["sequence"][::-2].str.contains("*")
 )
 
@@ -146,9 +147,9 @@ The threshold for considering an acceptable alignment can be adjusted with the
 `accept_prefix_alignment` and `accept_suffix_alignment` arguments. By default,
 both thresholds are set to 0.75.
 
-The thresholds represent a fraction of the maximum alignment score. So, a value of 0.75
+The thresholds are represent a percentage of the maximum alignment score. So, a value of 0.75
 means alignments producing scores that are greater than 75% the maximum theoretical score
-will be accepted.
+will be accepted. Thus, valid values are between 0 and 1.
 
 Either an exact match or partial match (accepted alignment) must be made for both adapter sequences to recover a variant. 
 In order to skip alignment and only look for exact matches, set the `skip_alignment` argument to `True`.
