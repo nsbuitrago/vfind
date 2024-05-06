@@ -15,7 +15,7 @@ dependencies = [
     "polars"
 ]
 authors = [
-    {name = "Nicolas Buitrago", email = "44626938+nsbuitrago@users.noreply.github.com."}
+    {name = "nsbuitrago", email = "44626938+nsbuitrago@users.noreply.github.com"}
 ]
 description = "A simple variant finder for NGS data"
 readme = "README.md"

@@ -40,18 +40,9 @@
                     cmake
                     libclang
                     pkg-config
-                    (maturin.overrideAttrs (oldAttrs: rec {
-                      version = "1.5.1";
-                      src = pkgs.fetchFromGitHub {
-                        owner = "PyO3";
-                        repo = "maturin";
-                        rev = "7d711f0c4a7c052608dc2e16d5c6721b9666d076";
-                        hash = "sha256-3rID2epV1pCwpofFf9Wuafs1SlBWH7e7/4HPaSUAriQ=";
-                        fetchSubmodules = true;
-                      };
-                    }))
-                    # python3 packages
-                    pkgs.python312Packages.pytest
+                    libllvm
+                    pkg-config
+                    maturin
                     pkgs.python312Packages.polars
                   ];
 

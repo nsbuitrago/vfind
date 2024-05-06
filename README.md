@@ -45,8 +45,7 @@ see the [vFind-cli](https://github.com/nsbuitrago/vfind-cli) repository.
 
 ### PyPI (Recommended for most)
 
-The package is available on [PyPI](https://pypi.org/project/vfind) and can be installed via pip (or alternatives like
-[uv](https://github.com/astral-sh/uv)).
+The package is available on [PyPI](https://pypi.org/project/vfind) and can be installed via pip (or alternatives like [uv](https://github.com/astral-sh/uv)).
 
 Below is an example using pip with Python3 in a new project.
 
@@ -142,14 +141,12 @@ variants = find_variants(
 )
 ```
 
-Only alignments that produce scores meeting a threshold will be considered accepted. 
-The threshold for considering an acceptable alignment can be adjusted with the
-`accept_prefix_alignment` and `accept_suffix_alignment` arguments. By default,
-both thresholds are set to 0.75.
+Alignments are accepted if they produce a score above a set threshold. The threshold
+for considering an acceptable alignment can be adjusted with the `accept_prefix_alignment`
+and `accept_suffix_alignment` arguments. By default, both thresholds are set to 0.75.
 
 The thresholds are represent a percentage of the maximum alignment score. So, a value of 0.75
-means alignments producing scores that are greater than 75% the maximum theoretical score
-will be accepted. Thus, valid values are between 0 and 1.
+means alignments producing scores that are greater than 75% the maximum theoretical score will be accepted. Thus, valid values are between 0 and 1.
 
 Either an exact match or partial match (accepted alignment) must be made for both adapter sequences to recover a variant. 
 In order to skip alignment and only look for exact matches, set the `skip_alignment` argument to `True`.
