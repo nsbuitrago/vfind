@@ -1,5 +1,5 @@
 {
-  description = "vFind devenv";
+  description = "vFind development environment";
 
   inputs = {
     nixpkgs.url = "github:cachix/devenv-nixpkgs/rolling";
@@ -39,18 +39,16 @@
                   packages = with pkgs; [
                     cmake
                     libclang
+                    pkg-config
                     libllvm
                     pkg-config
                     maturin
-                    # python3 packages
-                    pkgs.python312Packages.pytest
                     pkgs.python312Packages.polars
                   ];
 
                   languages.python = {
                     enable = true;
                     version = "3.12";
-                    manylinux.enable = true;
                   };
 
                   languages.rust.enable = true;
@@ -58,7 +56,6 @@
                   enterShell = ''
                     export LIBCLANG_PATH="$DEVENV_PROFILE/lib"
                   '';
-
                 }
               ];
             };

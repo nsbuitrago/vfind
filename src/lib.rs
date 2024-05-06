@@ -1,17 +1,25 @@
 use flate2::read::GzDecoder;
+use indicatif::{ProgressBar, ProgressState, ProgressStyle};
 use memchr::memmem;
 use parasail_rs::{Aligner, Matrix, Profile};
+use polars::prelude::*;
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 use seq_io::fastq::{Reader, Record};
 use seq_io::parallel::parallel_fastq;
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::io::Read;
 use std::{fs::File, path::Path};
 
-use pyo3::{exceptions::PyIOError, prelude::*};
+/// Attempt to translate a DNA sequence to an amino acid sequence. If the sequence
+/// length is not divisible by 3, the None variant is returned.
+pub fn translate(seq: &[u8]) -> Option<String> {
+    if seq.len() % 3 != 0 {
+        return None;
+    }
 
-/// Translate a DNA sequence to an amino acid sequence
-pub fn translate(seq: &[u8]) -> String {
     let mut peptide = String::with_capacity(seq.len() / 3);
 
     'outer: for triplet in seq.chunks_exact(3) {
@@ -34,7 +42,7 @@ pub fn translate(seq: &[u8]) -> String {
 
         peptide.push(amino_acid);
     }
-    peptide
+    Some(peptide)
 }
 
 /// https://www.ncbi.nlm.nih.gov/Taxonomy/Utils/wprintgc.cgi
@@ -88,16 +96,19 @@ static ASCII_TO_INDEX: [usize; 128] = [
     4, 4, 4, 4, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, // 112-127  (116 = t, 117 = u)
 ];
 
-/// Get adapter aligner
+/// Construct and return aligner with an adapter profile.
 fn get_aligner(
-    prefix: &[u8],
+    adapter: &[u8],
     scoring_matrix: &Matrix,
     gap_open_penalty: i32,
     gap_extend_penalty: i32,
 ) -> Aligner {
-    let prefix_profile = Profile::new(prefix, true, scoring_matrix).unwrap();
+    let adapter_profile = Profile::new(adapter, true, scoring_matrix)
+        .map_err(|e| PyValueError::new_err(format!("Error creating profile for adapter: {}", e)))
+        .unwrap();
+
     Aligner::new()
-        .profile(prefix_profile)
+        .profile(adapter_profile)
         .gap_open(gap_open_penalty)
         .gap_extend(gap_extend_penalty)
         .semi_global()
@@ -113,29 +124,30 @@ fn find_adapter_match(
     aligner: &Aligner,
     min_align_score: f64,
     is_prefix: bool,
+    skip_alignment: bool,
 ) -> Option<usize> {
-    let adapter_match = {
-        let exact_match = memmem::find(seq, adapter);
-        if let Some(exact_match) = exact_match {
+    let exact_match = memmem::find(seq, adapter);
+    if let Some(exact_match) = exact_match {
+        match is_prefix {
+            true => Some(exact_match + adapter.len()),
+            false => Some(exact_match),
+        }
+    } else {
+        if skip_alignment {
+            return None;
+        }
+
+        let alignment = aligner.align(None, seq).unwrap();
+        let score = alignment.get_score();
+        if score as f64 > min_align_score {
             match is_prefix {
-                true => Some(exact_match + adapter.len()),
-                false => Some(exact_match),
+                true => Some(alignment.get_length().unwrap() as usize),
+                false => Some(seq.len() - alignment.get_length().unwrap() as usize),
             }
         } else {
-            let alignment = aligner.align(None, seq).unwrap();
-            let score = alignment.get_score();
-            if score as f64 > min_align_score {
-                match is_prefix {
-                    true => Some(alignment.get_length().unwrap() as usize),
-                    false => Some(seq.len() - alignment.get_length().unwrap() as usize),
-                }
-            } else {
-                None
-            }
+            None
         }
-    };
-
-    adapter_match
+    }
 }
 
 #[pyfunction]
@@ -150,8 +162,29 @@ fn find_adapter_match(
     accept_suffix_alignment=0.75,
     n_threads=3,
     queue_len=2,
-    skip_translation=false
+    skip_translation=false,
+    skip_alignment=false,
+    show_progress=true,
 ))]
+/// Find variable regions flanked by adapters in a FASTQ dataset.
+///
+/// Args:
+///     fq_path (str): Path to FASTQ file
+///     adapters (tuple(str, str)): Tuple of prefix and suffix adapters
+///     match_score (int): Match score for alignment (default = 3)
+///     mismatch_score (int): Mismatch score for alignment (default = -2)
+///     gap_open_penalty (int): Gap open penalty for alignment (default = 5)
+///     gap_extend_penalty (int): Gap extend penalty for alignment (default = 2)
+///     accept_prefix_alignment (float): Threshold for accepting prefix alignment (default = 0.75)
+///     accept_suffix_alignment (float): Threshold for accepting suffix alignment (default = 0.75)
+///     n_threads (int): Number of threads (default = 3)
+///     queue_len (int): Queue length (default = 2)
+///     skip_translation (bool): Skip translation (default = False)
+///     skip_alignment (bool): Skip alignments (default = False)
+///     show_progress (bool): Show progress bar (default = True)
+///
+/// Returns:
+///     polars.DataFrame: dataframe with columns 'sequence' and 'count'
 pub fn find_variants(
     fq_path: String,
     adapters: (String, String),
@@ -164,12 +197,29 @@ pub fn find_variants(
     n_threads: u32,
     queue_len: usize,
     skip_translation: bool,
+    skip_alignment: bool,
+    show_progress: bool,
 ) -> PyResult<PyDataFrame> {
-    let fq_path = Path::new(&fq_path);
-    if !fq_path.exists() {
-        return Err(PyIOError::new_err("File {} does not exist."));
+    if accept_prefix_alignment > 1.0 || accept_prefix_alignment <= 0.0 {
+        return Err(PyValueError::new_err(
+            "accept_prefix_alignment must be between 0 and 1",
+        ));
     }
 
+    if accept_suffix_alignment > 1.0 || accept_suffix_alignment <= 0.0 {
+        return Err(PyValueError::new_err(
+            "accept_suffix_alignment must be between 0 and 1",
+        ));
+    }
+
+    assert!(accept_suffix_alignment > 0.0 && accept_suffix_alignment <= 1.0);
+    if accept_prefix_alignment == 1.0 && accept_suffix_alignment == 1.0 {
+        return Err(PyValueError::new_err(
+            "Both accept_prefix_alignment and accept_suffix_alignment are set to 1.0. This will result in only accepting exact matches of adapters. Set skip_alignment=True if this is the intended behavior.",
+        ));
+    }
+
+    let fq_path = Path::new(&fq_path);
     let fq_file = File::open(fq_path)?;
     let mut decoder = GzDecoder::new(&fq_file);
     let mut data = Vec::new();
@@ -181,7 +231,7 @@ pub fn find_variants(
 
     let prefix = adapters.0.as_bytes();
     let prefix_aligner = get_aligner(
-        &prefix,
+        prefix,
         &scoring_matrix,
         gap_open_penalty,
         gap_extend_penalty,
@@ -189,7 +239,7 @@ pub fn find_variants(
 
     let suffix = adapters.1.as_bytes();
     let suffix_aligner = get_aligner(
-        &suffix,
+        suffix,
         &scoring_matrix,
         gap_open_penalty,
         gap_extend_penalty,
@@ -199,49 +249,87 @@ pub fn find_variants(
     let min_prefix_score = accept_prefix_alignment * match_score as f64 * prefix.len() as f64;
     let min_suffix_score = accept_suffix_alignment * match_score as f64 * suffix.len() as f64;
 
-    let mut variants: HashMap<String, u32> = HashMap::new();
+    let mut variants: HashMap<String, u64> = HashMap::new();
+
+    let pb = if show_progress {
+        let pb = ProgressBar::new(data.len() as u64);
+        pb.set_style(ProgressStyle::with_template("{spinner:.green} {msg} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
+            .unwrap()
+            .with_key("eta", |state: &ProgressState, w: &mut dyn Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap())
+            .progress_chars("#>-"));
+        pb
+    } else {
+        ProgressBar::hidden()
+    };
+    pb.set_message(format!("Processing {}", fq_path.display()));
 
     parallel_fastq(
         reader,
         n_threads,
         queue_len,
         |record, variant| {
+            // find variable region in the read
             let seq = record.seq();
-            let start = find_adapter_match(seq, prefix, &prefix_aligner, min_prefix_score, true);
-            let end = find_adapter_match(seq, suffix, &suffix_aligner, min_suffix_score, false);
+            let start = find_adapter_match(
+                seq,
+                prefix,
+                &prefix_aligner,
+                min_prefix_score,
+                true,
+                skip_alignment,
+            );
+            let end = find_adapter_match(
+                seq,
+                suffix,
+                &suffix_aligner,
+                min_suffix_score,
+                false,
+                skip_alignment,
+            );
 
             if start.is_some() && end.is_some() && start.unwrap() < end.unwrap() {
                 *variant = Some(seq[start.unwrap()..end.unwrap()].to_vec());
             }
+
+            // determine number of bytes read and update progress
+            let (id, desc) = record.id_desc_bytes();
+            let n_bytes =
+                record.seq().len() + record.qual().len() + id.len() + desc.unwrap_or(&[]).len();
+            pb.inc(n_bytes as u64);
         },
         |_, variant| {
             if let Some(variant) = variant {
                 if skip_translation {
-                    let variant = String::from_utf8(variant.to_vec()).unwrap();
-                    *variants.entry(variant).or_insert(0) += 1;
+                    if let Ok(variant) = String::from_utf8(variant.to_vec()) {
+                        *variants.entry(variant).or_insert(0) += 1;
+                    }
                 } else {
-                    // translate and add to variants
-                    *variants.entry(translate(variant)).or_insert(0) += 1;
+                    // Attempt to translate and add to variants
+                    if let Some(variant) = translate(variant) {
+                        *variants.entry(variant).or_insert(0) += 1;
+                    }
                 }
             }
-
             None::<()>
         },
     )
     .unwrap();
 
-    let df = polars::df!(
-        "sequence" => variants.keys().cloned().collect::<Vec<String>>(),
-        "count" => variants.values().cloned().collect::<Vec<u32>>(),
+    pb.finish_and_clear();
+
+    let (seq, count): (Vec<String>, Vec<u64>) = variants.into_iter().unzip();
+    let df = df!(
+        "sequence" => seq,
+        "count" => count,
     )
-    .unwrap();
+    .map_err(|e| PyValueError::new_err(format!("Error creating DataFrame: {}", e)))?;
 
     Ok(PyDataFrame(df))
 }
 
 /// vFind Python module
 #[pymodule]
-fn vfind(_py: Python, m: &PyModule) -> PyResult<()> {
+fn vfind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(find_variants, m)?)?;
     Ok(())
 }
