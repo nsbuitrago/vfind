@@ -19,6 +19,10 @@ use exact adapter matches to find variants.
     To include non-coding sequences, set `skip_translation` to `False` to get
     all DNA sequences that are recovered before translation.
 
+### Misc.
+
+- Support x86_64 linux
+
 
 ## 0.1.0 - 2024-04-15
 
