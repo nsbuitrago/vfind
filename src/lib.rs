@@ -1,17 +1,12 @@
-use flate2::read::GzDecoder;
-use indicatif::{ProgressBar, ProgressState, ProgressStyle};
+use std::{collections::HashMap, fs::File};
+
 use memchr::memmem;
 use parasail_rs::{Aligner, Matrix, Profile};
-use polars::prelude::*;
-use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
+use polars::df;
+use pyo3::{exceptions::PyValueError, prelude::*};
 use pyo3_polars::PyDataFrame;
 use seq_io::fastq::{Reader, Record};
 use seq_io::parallel::parallel_fastq;
-use std::collections::HashMap;
-use std::fmt::Write;
-use std::io::Read;
-use std::{fs::File, path::Path};
 
 /// Attempt to translate a DNA sequence to an amino acid sequence. If the sequence
 /// length is not divisible by 3, the None variant is returned.
@@ -96,6 +91,18 @@ static ASCII_TO_INDEX: [usize; 128] = [
     4, 4, 4, 4, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, // 112-127  (116 = t, 117 = u)
 ];
 
+// Check that the accepted alignment thresholds are in the range (0, 1).
+fn validate_align_thresholds(value: f64, name: &str) -> PyResult<()> {
+    if value >= 1. || value <= 0. {
+        Err(PyValueError::new_err(format!(
+            "{} must be in range (0, 1)",
+            name
+        )))
+    } else {
+        Ok(())
+    }
+}
+
 /// Construct and return aligner with an adapter profile.
 fn get_aligner(
     adapter: &[u8],
@@ -113,7 +120,6 @@ fn get_aligner(
         .gap_extend(gap_extend_penalty)
         .semi_global()
         .scan()
-        .use_stats()
         .build()
 }
 
@@ -160,31 +166,28 @@ fn find_adapter_match(
     gap_extend_penalty=2,
     accept_prefix_alignment=0.75,
     accept_suffix_alignment=0.75,
-    n_threads=3,
-    queue_len=2,
     skip_translation=false,
     skip_alignment=false,
+    n_threads=3,
+    queue_len=2,
     show_progress=true,
 ))]
-/// Find variable regions flanked by adapters in a FASTQ dataset.
+/// Find variable regions flanked by constant adapters in FASTQ dataset.
 ///
 /// Args:
-///     fq_path (str): Path to FASTQ file
-///     adapters (tuple(str, str)): Tuple of prefix and suffix adapters
+///     fq_path (str): Path to fastq file
+///     adapters (tuple[str, str]): Tuple of adapters (prefix, suffix)
 ///     match_score (int): Match score for alignment (default = 3)
 ///     mismatch_score (int): Mismatch score for alignment (default = -2)
-///     gap_open_penalty (int): Gap open penalty for alignment (default = 5)
-///     gap_extend_penalty (int): Gap extend penalty for alignment (default = 2)
-///     accept_prefix_alignment (float): Threshold for accepting prefix alignment (default = 0.75)
-///     accept_suffix_alignment (float): Threshold for accepting suffix alignment (default = 0.75)
+///     gap_open_penalty (int): Gap opening penalty for alignment (default = -2)
+///     gap_extend_penalty (int): Gap extension penalty for alignment (default = -2)
+///     accept_prefix_alignment (float): Accepted prefix alignment threshold (default = 0.75)
+///     accept_prefix_alignment (float): Accepted suffix alignment threshold (default = 0.75)
+///     skip_translation (bool): Skip translation to amino acid sequence (default = True)
+///     skip_alignment (bool): Skip semi-global alignment step (default = False)
 ///     n_threads (int): Number of threads (default = 3)
 ///     queue_len (int): Queue length (default = 2)
-///     skip_translation (bool): Skip translation (default = False)
-///     skip_alignment (bool): Skip alignments (default = False)
 ///     show_progress (bool): Show progress bar (default = True)
-///
-/// Returns:
-///     polars.DataFrame: dataframe with columns 'sequence' and 'count'
 pub fn find_variants(
     fq_path: String,
     adapters: (String, String),
@@ -194,37 +197,20 @@ pub fn find_variants(
     gap_extend_penalty: i32,
     accept_prefix_alignment: f64,
     accept_suffix_alignment: f64,
-    n_threads: u32,
-    queue_len: usize,
     skip_translation: bool,
     skip_alignment: bool,
+    n_threads: u32,
+    queue_len: usize,
     show_progress: bool,
 ) -> PyResult<PyDataFrame> {
-    if accept_prefix_alignment > 1.0 || accept_prefix_alignment <= 0.0 {
-        return Err(PyValueError::new_err(
-            "accept_prefix_alignment must be between 0 and 1",
-        ));
-    }
-
-    if accept_suffix_alignment > 1.0 || accept_suffix_alignment <= 0.0 {
-        return Err(PyValueError::new_err(
-            "accept_suffix_alignment must be between 0 and 1",
-        ));
-    }
-
-    assert!(accept_suffix_alignment > 0.0 && accept_suffix_alignment <= 1.0);
-    if accept_prefix_alignment == 1.0 && accept_suffix_alignment == 1.0 {
-        return Err(PyValueError::new_err(
-            "Both accept_prefix_alignment and accept_suffix_alignment are set to 1.0. This will result in only accepting exact matches of adapters. Set skip_alignment=True if this is the intended behavior.",
-        ));
-    }
-
-    let fq_path = Path::new(&fq_path);
-    let fq_file = File::open(fq_path)?;
-    let mut decoder = GzDecoder::new(&fq_file);
-    let mut data = Vec::new();
-    decoder.read_to_end(&mut data)?;
-    let reader = Reader::new(data.as_slice());
+    // validate accept prefix/suffix accept thresholds
+    validate_align_thresholds(accept_prefix_alignment, "accept_prefix_alignment")?;
+    validate_align_thresholds(accept_suffix_alignment, "accept_suffix_alignment")?;
+    // load data
+    let file = File::open(fq_path)?;
+    let mut buffer = buffer_redux::BufReader::new(file);
+    buffer.read_into_buf().unwrap();
+    let reader = Reader::new(flate2::bufread::GzDecoder::new(buffer));
 
     let scoring_matrix = Matrix::create(b"ATCG", match_score, mismatch_score)
         .expect("Error creating scoring matrix");
@@ -250,18 +236,6 @@ pub fn find_variants(
     let min_suffix_score = accept_suffix_alignment * match_score as f64 * suffix.len() as f64;
 
     let mut variants: HashMap<String, u64> = HashMap::new();
-
-    let pb = if show_progress {
-        let pb = ProgressBar::new(data.len() as u64);
-        pb.set_style(ProgressStyle::with_template("{spinner:.green} {msg} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-            .unwrap()
-            .with_key("eta", |state: &ProgressState, w: &mut dyn Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap())
-            .progress_chars("#>-"));
-        pb
-    } else {
-        ProgressBar::hidden()
-    };
-    pb.set_message(format!("Processing {}", fq_path.display()));
 
     parallel_fastq(
         reader,
@@ -290,12 +264,6 @@ pub fn find_variants(
             if start.is_some() && end.is_some() && start.unwrap() < end.unwrap() {
                 *variant = Some(seq[start.unwrap()..end.unwrap()].to_vec());
             }
-
-            // determine number of bytes read and update progress
-            let (id, desc) = record.id_desc_bytes();
-            let n_bytes =
-                record.seq().len() + record.qual().len() + id.len() + desc.unwrap_or(&[]).len();
-            pb.inc(n_bytes as u64);
         },
         |_, variant| {
             if let Some(variant) = variant {
@@ -315,8 +283,6 @@ pub fn find_variants(
     )
     .unwrap();
 
-    pb.finish_and_clear();
-
     let (seq, count): (Vec<String>, Vec<u64>) = variants.into_iter().unzip();
     let df = df!(
         "sequence" => seq,
@@ -327,7 +293,6 @@ pub fn find_variants(
     Ok(PyDataFrame(df))
 }
 
-/// vFind Python module
 #[pymodule]
 fn vfind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(find_variants, m)?)?;
