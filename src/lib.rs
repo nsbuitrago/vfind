@@ -92,7 +92,7 @@ static ASCII_TO_INDEX: [usize; 128] = [
 ];
 
 // Check that the accepted alignment thresholds are in the range (0, 1).
-fn validate_align_thresholds(value: f64, name: &str) -> PyResult<()> {
+fn validate_align_thresholds(value: f32, name: &str) -> PyResult<()> {
     if value >= 1. || value <= 0. {
         Err(PyValueError::new_err(format!(
             "{} must be in range (0, 1)",
@@ -128,7 +128,7 @@ fn find_adapter_match(
     seq: &[u8],
     adapter: &[u8],
     aligner: &Aligner,
-    min_align_score: f64,
+    min_align_score: f32,
     is_prefix: bool,
     skip_alignment: bool,
 ) -> Option<usize> {
@@ -145,7 +145,7 @@ fn find_adapter_match(
 
         let alignment = aligner.align(None, seq).unwrap();
         let score = alignment.get_score();
-        if score as f64 > min_align_score {
+        if score as f32 > min_align_score {
             match is_prefix {
                 true => Some(alignment.get_length().unwrap() as usize),
                 false => Some(seq.len() - alignment.get_length().unwrap() as usize),
@@ -195,8 +195,8 @@ pub fn find_variants(
     mismatch_score: i32,
     gap_open_penalty: i32,
     gap_extend_penalty: i32,
-    accept_prefix_alignment: f64,
-    accept_suffix_alignment: f64,
+    accept_prefix_alignment: f32,
+    accept_suffix_alignment: f32,
     skip_translation: bool,
     skip_alignment: bool,
     n_threads: u32,
@@ -232,8 +232,8 @@ pub fn find_variants(
     );
 
     // min score for accepted prefix and suffix alignment
-    let min_prefix_score = accept_prefix_alignment * match_score as f64 * prefix.len() as f64;
-    let min_suffix_score = accept_suffix_alignment * match_score as f64 * suffix.len() as f64;
+    let min_prefix_score = accept_prefix_alignment * match_score as f32 * prefix.len() as f32;
+    let min_suffix_score = accept_suffix_alignment * match_score as f32 * suffix.len() as f32;
 
     let mut variants: HashMap<String, u64> = HashMap::new();
 
