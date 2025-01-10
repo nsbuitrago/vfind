@@ -8,8 +8,8 @@ use pyo3_polars::PyDataFrame;
 use seq_io::fastq::{Reader, Record};
 use seq_io::parallel::parallel_fastq;
 
-/// Attempt to translate a DNA sequence to an amino acid sequence. If the sequence
-/// length is not divisible by 3, the None variant is returned.
+/// Attempt to translate a DNA sequence to an amino acid sequence. If the
+/// sequence length is not divisible by 3, the None variant is returned.
 pub fn translate(seq: &[u8]) -> Option<String> {
     if seq.len() % 3 != 0 {
         return None;
@@ -91,7 +91,7 @@ static ASCII_TO_INDEX: [usize; 128] = [
     4, 4, 4, 4, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, // 112-127  (116 = t, 117 = u)
 ];
 
-// Check that the accepted alignment thresholds are in the range (0, 1).
+/// Check that the accepted alignment thresholds are in the range (0, 1).
 fn validate_align_thresholds(value: f32, name: &str) -> PyResult<()> {
     if value >= 1. || value <= 0. {
         Err(PyValueError::new_err(format!(
@@ -123,37 +123,49 @@ fn get_aligner(
         .build()
 }
 
-/// Find where adapter matches in the read if it exists
+/// Find any exact matches of the adapter on the sequence.
+fn exact_adapter_match(seq: &[u8], adapter: &[u8], location: &Location) -> Option<usize> {
+    if let Some(exact_match) = memmem::find(seq, adapter) {
+        match location {
+            Location::Prefix => Some(exact_match + adapter.len()),
+            Location::Suffix => Some(exact_match),
+        }
+    } else {
+        None
+    }
+}
+
+/// Align adapter to sequence and check if produced score is greater than the
+/// minimum score.
+fn align_adapter(
+    seq: &[u8],
+    aligner: &Aligner,
+    min_align_score: f32,
+    orientation: &Location,
+) -> Option<usize> {
+    let alignment = aligner.align(None, seq).unwrap();
+    let score = alignment.get_score();
+    if score as f32 > min_align_score {
+        match orientation {
+            Location::Prefix => Some(alignment.get_length().unwrap() as usize),
+            Location::Suffix => Some(seq.len() - alignment.get_length().unwrap() as usize),
+        }
+    } else {
+        None
+    }
+}
+
+/// Find where adapter matches in the read if it exists by exact match or
+/// optional semi-global alignment.
 fn find_adapter_match(
     seq: &[u8],
     adapter: &[u8],
     aligner: &Aligner,
     min_align_score: f32,
-    is_prefix: bool,
-    skip_alignment: bool,
+    orientation: &Location,
 ) -> Option<usize> {
-    let exact_match = memmem::find(seq, adapter);
-    if let Some(exact_match) = exact_match {
-        match is_prefix {
-            true => Some(exact_match + adapter.len()),
-            false => Some(exact_match),
-        }
-    } else {
-        if skip_alignment {
-            return None;
-        }
-
-        let alignment = aligner.align(None, seq).unwrap();
-        let score = alignment.get_score();
-        if score as f32 > min_align_score {
-            match is_prefix {
-                true => Some(alignment.get_length().unwrap() as usize),
-                false => Some(seq.len() - alignment.get_length().unwrap() as usize),
-            }
-        } else {
-            None
-        }
-    }
+    exact_adapter_match(seq, adapter, orientation)
+        .or_else(|| align_adapter(seq, aligner, min_align_score, orientation))
 }
 
 #[pyfunction]
@@ -235,6 +247,7 @@ pub fn find_variants(
     let min_prefix_score = accept_prefix_alignment * match_score as f32 * prefix.len() as f32;
     let min_suffix_score = accept_suffix_alignment * match_score as f32 * suffix.len() as f32;
 
+
     let mut variants: HashMap<String, u64> = HashMap::new();
 
     parallel_fastq(
@@ -303,66 +316,82 @@ fn vfind(m: &Bound<'_, PyModule>) -> PyResult<()> {
 mod tests {
     use super::*;
 
-    const MATCH_SCORE: i32 = 3;
-    const MISMATCH_SCORE: i32 = -2;
-    const GAP_OPEN_PENALTY: i32 = 5;
-    const GAP_EXTEND_PENALTY: i32 = 2;
-    const ACCEPT_ALIGNMENT: f64 = 0.75;
-
     #[test]
-    fn test_good_prefix_alignment() {
-        let prefix = b"GGGCCCAGCCGGCCGGAT";
-        let seq = b"GGGCCCAGCCGGCGGGATATGGCGGGCATCTGTGCACTTCCGGAGGCGGAGGTTCAG";
-        let good_alignment = true;
-        _test_alignment_helper(prefix, seq, good_alignment);
+    fn translate_dna_seq() {
+        let dna_seq = b"TTCTTAATTATGGTCTCTCCTACTGCCTACCATCAAAATAAAGATGAATGCTGGCGTGGGTAA";
+        let amino_acid_seq = "FLIMVSPTAYHQNKDECWRG*";
+
+        let aa_from_dna = translate(dna_seq);
+
+        assert!(aa_from_dna.is_some());
+        assert_eq!(aa_from_dna.unwrap(), amino_acid_seq);
     }
 
     #[test]
-    fn test_bad_prefix_alignment() {
-        let prefix = b"GGGCCCAGCCGGCCGGAT";
-        let seq = b"GGGTCTAACCGGCGGGATATGGCGGGCATCTGTGCACTTCCGGAGGCGGAGGTTCAG";
-        let good_alignment = false;
-        _test_alignment_helper(prefix, seq, good_alignment)
+    fn exact_adapter_matches() {
+        let seq = b"ACGTNNNNTGCA";
+        let fwd_adapter = b"ACGT";
+        let rev_adapter = b"TGCA";
+
+        let variant_start_idx = exact_adapter_match(seq, fwd_adapter, &Location::Prefix);
+        let variant_end_idx = exact_adapter_match(seq, rev_adapter, &Location::Suffix);
+
+        assert!(variant_start_idx.is_some());
+        assert!(variant_end_idx.is_some());
+
+        assert_eq!(variant_start_idx.unwrap(), 4);
+        assert_eq!(variant_end_idx.unwrap(), 8);
+
+        let variant = &seq[variant_start_idx.unwrap()..variant_end_idx.unwrap()];
+        assert_eq!(variant, b"NNNN");
     }
 
     #[test]
-    fn test_good_suffix_alignment() {
-        let suffix = b"CCGGAGGCGGAGGTTCAG";
-        let seq = b"GGGCCCAGCCGGCCGGATATGGCGGGCATCTGTGCACTTCCGGAGGCGGAGGTTGAG";
-        let good_alignment = true;
-        _test_alignment_helper(suffix, seq, good_alignment);
-    }
+    fn aligned_adapter_match() {
+        let seq = b"ACCTNNNNTGGA"; // fwd and rev adapters have single nucleotide substitution
+        let fwd_adapter = b"ACGT";
+        let rev_adapter = b"TGCA";
 
-    #[test]
-    fn test_bad_suffix_alignment() {
-        let suffix = b"CCGGAGGCGGAGGTTCAG";
-        let seq = b"GGGCCCAGCCGGCCGGATATGGCGGGCATCTGTGCACTTCCGGAGGCCGTGCTCCAC";
-        let good_alignment = false;
-        _test_alignment_helper(suffix, seq, good_alignment)
-    }
+        let exact_prefix_match = exact_adapter_match(seq, fwd_adapter, &Location::Prefix);
+        let exact_suffix_match = exact_adapter_match(seq, rev_adapter, &Location::Suffix);
 
-    /// helper fn to test alignments
-    fn _test_alignment_helper(query: &[u8], template: &[u8], pass: bool) {
-        let min_align_score = ACCEPT_ALIGNMENT * MATCH_SCORE as f64 * query.len() as f64;
+        assert!(exact_prefix_match.is_none());
+        assert!(exact_suffix_match.is_none());
 
-        let scoring_matrix = Matrix::create(b"ACTG", MATCH_SCORE, MISMATCH_SCORE).unwrap();
+        // setup aligners
+        let align_threshold = 0.5;
+        let match_score = 3;
+        let mismatch_score = -2;
+        let gap_open_penalty = 5;
+        let gap_extend_penalty = 2;
+        let scoring_matrix = Matrix::create(b"ACGT", match_score, mismatch_score).unwrap();
 
-        let profile = Profile::new(query, true, &scoring_matrix).unwrap();
-        let aligner = Aligner::new()
-            .profile(profile)
-            .gap_open(GAP_OPEN_PENALTY)
-            .gap_extend(GAP_EXTEND_PENALTY)
-            .semi_global()
-            .scan()
-            .use_stats()
-            .build();
+        let fwd_aligner = get_aligner(
+            fwd_adapter,
+            &scoring_matrix,
+            gap_open_penalty,
+            gap_extend_penalty,
+        );
+        let rev_aligner = get_aligner(
+            rev_adapter,
+            &scoring_matrix,
+            gap_open_penalty,
+            gap_extend_penalty,
+        );
 
-        let alignment = aligner.align(None, template).unwrap();
-        let score = alignment.get_score();
-        if pass {
-            assert!(score as f64 > min_align_score);
-        } else {
-            assert!(min_align_score > score as f64);
-        }
+        let min_prefix_align_score =
+            fwd_adapter.len() as f32 * match_score as f32 * align_threshold;
+        let min_suffix_align_score = min_prefix_align_score;
+
+        let aligned_prefix_match =
+            align_adapter(seq, &fwd_aligner, min_prefix_align_score, &Location::Prefix);
+
+        let aligned_suffix_match =
+            align_adapter(seq, &rev_aligner, min_suffix_align_score, &Location::Suffix);
+
+        assert!(aligned_prefix_match.is_some());
+        assert!(aligned_suffix_match.is_some());
+        assert_eq!(aligned_prefix_match.unwrap(), 4);
+        assert_eq!(aligned_suffix_match.unwrap(), 8);
     }
 }
