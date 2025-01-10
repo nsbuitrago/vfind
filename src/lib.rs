@@ -123,6 +123,11 @@ fn get_aligner(
         .build()
 }
 
+/// Where the adapter is located relative to the variable region.
+enum Location {
+    Prefix,
+    Suffix,
+}
 /// Find any exact matches of the adapter on the sequence.
 fn exact_adapter_match(seq: &[u8], adapter: &[u8], location: &Location) -> Option<usize> {
     if let Some(exact_match) = memmem::find(seq, adapter) {
