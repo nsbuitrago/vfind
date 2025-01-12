@@ -1,11 +1,12 @@
 use std::{collections::HashMap, fs::File};
 
+use fastq::{each_zipped, Record};
 use memchr::memmem;
 use parasail_rs::{Aligner, Matrix, Profile};
 use polars::df;
 use pyo3::{exceptions::PyValueError, prelude::*};
 use pyo3_polars::PyDataFrame;
-use seq_io::fastq::{Reader, Record};
+use seq_io::fastq::{Reader, Record as IORecord};
 use seq_io::parallel::parallel_fastq;
 
 /// Attempt to translate a DNA sequence to an amino acid sequence. If the
@@ -308,9 +309,145 @@ pub fn find_variants(
     Ok(PyDataFrame(df))
 }
 
+#[pyfunction]
+#[pyo3(signature = (
+    read1_path,
+    read2_path,
+    adapters,
+    match_score=3,
+    mismatch_score=-2,
+    gap_open_penalty=5,
+    gap_extend_penalty=2,
+    accept_prefix_alignment=0.75,
+    accept_suffix_alignment=0.75,
+))]
+/// Find variable regions flanked by constant adapters in FASTQ dataset.
+///
+/// Args:
+///     read1_path (str): Path to R1 fastq file
+///     read2_path (str): Path to R2 fastq file
+///     adapters (tuple[str, str]): Tuple of adapters (prefix, suffix)
+///     match_score (int): Match score for alignment (default = 3)
+///     mismatch_score (int): Mismatch score for alignment (default = -2)
+///     gap_open_penalty (int): Gap opening penalty for alignment (default = -2)
+///     gap_extend_penalty (int): Gap extension penalty for alignment (default = -2)
+///     accept_prefix_alignment (float): Accepted prefix alignment threshold (default = 0.75)
+///     accept_prefix_alignment (float): Accepted suffix alignment threshold (default = 0.75)
+pub fn find_sc_variants(
+    read1_path: String,
+    read2_path: String,
+    adapters: (String, String),
+    match_score: i32,
+    mismatch_score: i32,
+    gap_open_penalty: i32,
+    gap_extend_penalty: i32,
+    accept_prefix_alignment: f32,
+    accept_suffix_alignment: f32,
+) -> PyResult<PyDataFrame> {
+    let r1_file = File::open(read1_path)?;
+    let mut r1_buffer = buffer_redux::BufReader::new(r1_file);
+    r1_buffer.read_into_buf().unwrap();
+    let r1_reader = std::io::BufReader::new(flate2::bufread::GzDecoder::new(r1_buffer));
+
+    let r2_file = File::open(read2_path)?;
+    let mut r2_buffer = buffer_redux::BufReader::new(r2_file);
+    r2_buffer.read_into_buf().unwrap();
+    let r2_reader = std::io::BufReader::new(flate2::bufread::GzDecoder::new(r2_buffer));
+
+    let r1_parser = fastq::Parser::new(r1_reader);
+    let r2_parser = fastq::Parser::new(r2_reader);
+
+    let scoring_matrix = Matrix::create(b"ATCG", match_score, mismatch_score)
+        .expect("Error creating scoring matrix");
+
+    let prefix = adapters.0.as_bytes();
+    let prefix_aligner = get_aligner(
+        prefix,
+        &scoring_matrix,
+        gap_open_penalty,
+        gap_extend_penalty,
+    );
+
+    let suffix = adapters.1.as_bytes();
+    let suffix_aligner = get_aligner(
+        suffix,
+        &scoring_matrix,
+        gap_open_penalty,
+        gap_extend_penalty,
+    );
+
+    // min score for accepted prefix and suffix alignment
+    let min_prefix_score = accept_prefix_alignment * match_score as f32 * prefix.len() as f32;
+    let min_suffix_score = accept_suffix_alignment * match_score as f32 * suffix.len() as f32;
+
+    let mut variants: HashMap<(String, String, String), u64> = HashMap::new();
+
+    let _ = each_zipped(r1_parser, r2_parser, |r1, r2| {
+        if r1.is_some() && r2.is_some() {
+            // check if variant is in r2.
+            let r2_record = r2.unwrap();
+            let r2_seq = r2_record.seq();
+
+            let start = find_adapter_match(
+                r2_seq,
+                prefix,
+                &prefix_aligner,
+                min_prefix_score,
+                &Location::Prefix,
+            );
+            let end = find_adapter_match(
+                r2_seq,
+                suffix,
+                &suffix_aligner,
+                min_suffix_score,
+                &Location::Suffix,
+            );
+
+            if start.is_some() && end.is_some() && start.unwrap() < end.unwrap() {
+                let variant = r2_record.seq()[start.unwrap()..end.unwrap()].to_vec();
+                let r1_record = r1.unwrap();
+                let r1_seq = r1_record.seq();
+                // Assuming 10X v4 chemistry (16bp cell barcode followed by 12bp umi)
+                // extract the cell barcode
+                let cell_barcode = r1_seq[0..16].to_vec();
+                // extract umi
+                let umi = r1_seq[16..28].to_vec();
+
+                // convert variant sequence, cell barcode and umi to String
+                let variant_string = String::from_utf8(variant).unwrap();
+                let cell_barcode_string = String::from_utf8(cell_barcode).unwrap();
+                let umi_string = String::from_utf8(umi).unwrap();
+
+                *variants
+                    .entry((variant_string, cell_barcode_string, umi_string))
+                    .or_insert(0) += 1;
+            }
+            (true, true)
+        } else {
+            (false, false)
+        }
+    });
+    // construct python dataframe
+    let (keys, count): (Vec<_>, Vec<_>) = variants.into_iter().unzip();
+    let variant = keys.iter().map(|k| k.0.clone()).collect::<Vec<String>>();
+    let cell_barcode = keys.iter().map(|k| k.1.clone()).collect::<Vec<String>>();
+    let umi = keys.iter().map(|k| k.2.clone()).collect::<Vec<String>>();
+
+    let df = df!(
+        "variant" => variant,
+        "barcode" => cell_barcode,
+        "umi" => umi,
+        "count" => count
+    )
+    .map_err(|e| PyValueError::new_err(format!("Error creating DataFrame: {}", e)))?;
+
+    Ok(PyDataFrame(df))
+}
+
 #[pymodule]
 fn vfind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(find_variants, m)?)?;
+    m.add_function(wrap_pyfunction!(find_sc_variants, m)?)?;
     Ok(())
 }
 
