@@ -188,7 +188,7 @@ For more usage details, see the [API reference](docs/api-reference.md).
 
 Feedback is a gift and contributions are more than welcome. Please submit an
 issue or pull request for any bugs, suggestions, or feedback. Please see the 
-[developing](docs/developing) guide for more details on how to work on vFind.
+[developing](docs/developing.md) guide for more details on how to work on vFind.
 
 ## License
 

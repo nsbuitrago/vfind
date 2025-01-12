@@ -18,22 +18,30 @@ cd vfind
 2. Create a new Python virtual environment and install dev dependencies.
 
 ```bash
-uv venv
-source .venv/bin/activate
-
-# this will intsall maturin, polars, and any other required packages.
-uv pip install -r dev-requirements.txt
+uv sync
 ```
 
 3. Build and install the vFind package in your virtual environment with maturin. 
 
 ```bash
 # in the root project directory
-maturin develop
+maturin develop --uv
+
+# or
+make dev
 ```
 
-4. From here, you can make changes to the Rust library and run `maturin develop`
+4. From here, you can make changes to the Rust library and run `maturin develop --uv`
 to rebuild the package and install it in your virtual environment.
+
+To test the python side, you can import the vFind package and use the functions as usual.
+
+```python3
+from vfind import find_variants
+
+df = find_variants("test.fq.gz")
+print(df.n_unique())
+```
 
 ## Using the supplied flake.nix
 
