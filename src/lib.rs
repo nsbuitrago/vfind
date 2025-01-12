@@ -252,7 +252,6 @@ pub fn find_variants(
     let min_prefix_score = accept_prefix_alignment * match_score as f32 * prefix.len() as f32;
     let min_suffix_score = accept_suffix_alignment * match_score as f32 * suffix.len() as f32;
 
-
     let mut variants: HashMap<String, u64> = HashMap::new();
 
     parallel_fastq(
@@ -267,16 +266,14 @@ pub fn find_variants(
                 prefix,
                 &prefix_aligner,
                 min_prefix_score,
-                true,
-                skip_alignment,
+                &Location::Prefix,
             );
             let end = find_adapter_match(
                 seq,
                 suffix,
                 &suffix_aligner,
                 min_suffix_score,
-                false,
-                skip_alignment,
+                &Location::Suffix,
             );
 
             if start.is_some() && end.is_some() && start.unwrap() < end.unwrap() {
