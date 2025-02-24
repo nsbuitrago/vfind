@@ -1,64 +1,61 @@
 {
-  description = "vFind development environment";
+  description = "A Nix-flake-based Rust development environment";
 
   inputs = {
-    nixpkgs.url = "github:cachix/devenv-nixpkgs/rolling";
-    systems.url = "github:nix-systems/default";
-    devenv.url = "github:cachix/devenv";
-    devenv.inputs.nixpkgs.follows = "nixpkgs";
-    nixpkgs-python.url = "github:cachix/nixpkgs-python";
-    nixpkgs-python.inputs.nixpkgs.follows = "nixpkgs";
-    fenix.url = "github:nix-community/fenix";
-    fenix.inputs.nixpkgs.follows = "nixpkgs";
+    nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/0.1.*.tar.gz";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  nixConfig = {
-    extra-trusted-public-keys = "devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw=";
-    extra-substituters = "https://devenv.cachix.org";
-  };
-
-  outputs = { self, nixpkgs, devenv, systems, ... } @ inputs:
+  outputs = { self, nixpkgs, rust-overlay }:
     let
-      forEachSystem = nixpkgs.lib.genAttrs (import systems);
+      supportedSystems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forEachSupportedSystem = f: nixpkgs.lib.genAttrs supportedSystems (system: f {
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ rust-overlay.overlays.default self.overlays.default ];
+        };
+      });
     in
     {
-      packages = forEachSystem (system: {
-        devenv-up = self.devShells.${system}.default.config.procfileScript;
-      });
-
-      devShells = forEachSystem
-        (system:
+      overlays.default = final: prev: {
+        rustToolchain =
           let
-            pkgs = nixpkgs.legacyPackages.${system};
+            rust = prev.rust-bin;
           in
-          {
-            default = devenv.lib.mkShell {
-              inherit inputs pkgs;
-              modules = [
-                {
-                  packages = with pkgs; [
-                    cmake
-                    libclang
-                    pkg-config
-                    libllvm
-                    pkg-config
-                    maturin
-                    pkgs.python312Packages.polars
-                  ];
-
-                  languages.python = {
-                    enable = true;
-                    version = "3.12";
-                  };
-
-                  languages.rust.enable = true;
-                  languages.rust.channel = "nightly";
-                  enterShell = ''
-                    export LIBCLANG_PATH="$DEVENV_PROFILE/lib"
-                  '';
-                }
-              ];
+          if builtins.pathExists ./rust-toolchain.toml then
+            rust.fromRustupToolchainFile ./rust-toolchain.toml
+          else if builtins.pathExists ./rust-toolchain then
+            rust.fromRustupToolchainFile ./rust-toolchain
+          else
+            rust.stable.latest.default.override {
+              extensions = [ "rust-src" "rustfmt" ];
             };
-          });
+      };
+
+      devShells = forEachSupportedSystem ({ pkgs }: {
+        default = pkgs.mkShell {
+          packages = with pkgs; [
+            rustToolchain
+            openssl
+            pkg-config
+            cargo-deny
+            cargo-edit
+            cargo-watch
+            rust-analyzer
+            cmake
+            libclang
+            uv
+          ];
+
+          env = {
+            # Required by rust-analyzer
+            RUST_SRC_PATH = "${pkgs.rustToolchain}/lib/rustlib/src/rust/library";
+            LIBCLANG_PaTH = "${pkgs.libclang.lib}/lib";
+          };
+        };
+      });
     };
 }

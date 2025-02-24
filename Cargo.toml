@@ -9,10 +9,10 @@ name = "vfind"
 crate-type = ["cdylib"]
 
 [dependencies]
+flate2 = "1.1.0"
 indicatif = { version = "0.17.11", features = ["rayon"] }
 log = "0.4.26"
 memchr = "2.7.4"
-noodles = { version = "0.93.0", features = ["bgzf"] }
 parasail-rs = "0.7.7"
 polars = "0.46.0"
 pyo3 = "0.23.4"
