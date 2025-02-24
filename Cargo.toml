@@ -10,11 +10,11 @@ crate-type = ["cdylib"]
 
 [dependencies]
 flate2 = "1.0.28"
-indicatif = { version = "0.17.8", features = ["rayon"] }
-log = "0.4.21"
-memchr = "2.7.2"
-parasail-rs = "0.7.0"
+indicatif = { version = "0.17.11", features = ["rayon"] }
+log = "0.4.26"
+memchr = "2.7.4"
+parasail-rs = "0.7.7"
 polars = "0.39.2"
 pyo3 = "0.21.2"
 pyo3-polars = "0.13.0"
-seq_io = "0.3.2"
+seq_io = "0.3.3"
