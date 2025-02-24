@@ -13,7 +13,7 @@
 ## Introduction
 
 vFind is unlike a traditional [*variant caller*](https://gencore.bio.nyu.edu/variant-calling-pipeline-gatk4/).
-It is actually using a simpler algorithm which is *usually* sufficient for 
+It is actually using a simpler algorithm which is *usually* sufficient for
 screening experiments. The main use case is finding variants from a library that
 has constant adapter sequences flanking a variable region.
 
@@ -80,7 +80,7 @@ cd vfind
 uv sync
 
 # this will build and install vfind in the virtual env
-uv run maturin develop --u 
+uv run maturin develop --u
 ```
 
 ## Examples
@@ -96,7 +96,7 @@ fq_path = "./path/to/your/fastq/file.fq.gz" # path to fq file
 
 variants = find_variants(fq_path, adapters)
 
-# print the number of unique sequences 
+# print the number of unique sequences
 print(variants.n_unique())
 ```
 
@@ -104,7 +104,7 @@ print(variants.n_unique())
 `sequence` contains the amino acid sequence of the variable regions and
 `count` contains the frequency of those variant.
 
-We can then use [dataframe methods](https://docs.pola.rs/py-polars/html/reference/dataframe/index.html) 
+We can then use [dataframe methods](https://docs.pola.rs/py-polars/html/reference/dataframe/index.html)
 to further analyze the recovered variants. Some examples are shown below.
 
 ```python
@@ -162,7 +162,7 @@ and `accept_suffix_alignment` arguments. By default, both thresholds are set to 
 The thresholds are represent a percentage of the maximum alignment score. So, a value of 0.75
 means alignments producing scores that are greater than 75% the maximum theoretical score will be accepted. Thus, valid values are between 0 and 1.
 
-Either an exact match or partial match (accepted alignment) must be made for both adapter sequences to recover a variant. 
+Either an exact match or partial match (accepted alignment) must be made for both adapter sequences to recover a variant.
 In order to skip alignment and only look for exact matches, set the `skip_alignment` argument to `True`.
 
 ### Miscellaneous
@@ -198,10 +198,9 @@ For more usage details, see the [API reference](./docs/api-reference.md).
 ## Contributing
 
 Feedback is a gift and contributions are more than welcome. Please submit an
-issue or pull request for any bugs, suggestions, or feedback. Please see the 
-[developing](./docs/developing) guide for more details on how to work on vFind.
+issue or pull request for any bugs, suggestions, or feedback. Please see the
+[developing](./docs/developing.md) guide for more details on how to work on vFind.
 
 ## License
 
-vFind is licensed under the [MIT license](./LICENSE)
-
+vFind is licensed under the [MIT license](./LICENSE.md)
