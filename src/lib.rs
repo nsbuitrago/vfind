@@ -1,6 +1,7 @@
-use flate2::read::GzDecoder;
-use indicatif::{ProgressBar, ProgressState, ProgressStyle};
+// use flate2::read::GzDecoder;
+use indicatif::ProgressBar;
 use memchr::memmem;
+use noodles::bgzf;
 use parasail_rs::{Aligner, Matrix, Profile};
 use polars::prelude::*;
 use pyo3::exceptions::PyValueError;
@@ -9,9 +10,7 @@ use pyo3_polars::PyDataFrame;
 use seq_io::fastq::{Reader, Record};
 use seq_io::parallel::parallel_fastq;
 use std::collections::HashMap;
-use std::fmt::Write;
-use std::io::Read;
-use std::{fs::File, path::Path};
+use std::fs::File;
 
 /// Attempt to translate a DNA sequence to an amino acid sequence. If the sequence
 /// length is not divisible by 3, the None variant is returned.
@@ -219,12 +218,8 @@ pub fn find_variants(
         ));
     }
 
-    let fq_path = Path::new(&fq_path);
-    let fq_file = File::open(fq_path)?;
-    let mut decoder = GzDecoder::new(&fq_file);
-    let mut data = Vec::new();
-    decoder.read_to_end(&mut data)?;
-    let reader = Reader::new(data.as_slice());
+    let bgzf_reader = File::open(fq_path).map(bgzf::Reader::new)?;
+    let reader = Reader::new(bgzf_reader);
 
     let scoring_matrix = Matrix::create(b"ATCG", match_score, mismatch_score)
         .expect("Error creating scoring matrix");
@@ -252,16 +247,10 @@ pub fn find_variants(
     let mut variants: HashMap<String, u64> = HashMap::new();
 
     let pb = if show_progress {
-        let pb = ProgressBar::new(data.len() as u64);
-        pb.set_style(ProgressStyle::with_template("{spinner:.green} {msg} [{elapsed_precise}] [{wide_bar:.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-            .unwrap()
-            .with_key("eta", |state: &ProgressState, w: &mut dyn Write| write!(w, "{:.1}s", state.eta().as_secs_f64()).unwrap())
-            .progress_chars("#>-"));
-        pb
+        ProgressBar::new_spinner()
     } else {
         ProgressBar::hidden()
     };
-    pb.set_message(format!("Processing {}", fq_path.display()));
 
     parallel_fastq(
         reader,
@@ -290,12 +279,6 @@ pub fn find_variants(
             if start.is_some() && end.is_some() && start.unwrap() < end.unwrap() {
                 *variant = Some(seq[start.unwrap()..end.unwrap()].to_vec());
             }
-
-            // determine number of bytes read and update progress
-            let (id, desc) = record.id_desc_bytes();
-            let n_bytes =
-                record.seq().len() + record.qual().len() + id.len() + desc.unwrap_or(&[]).len();
-            pb.inc(n_bytes as u64);
         },
         |_, variant| {
             if let Some(variant) = variant {
