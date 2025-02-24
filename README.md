@@ -40,33 +40,47 @@ please see the [API reference](docs/api-reference.md)
 
 ## Installation
 
-vFind is a Python package and can be installed via pip or nix. For a CLI version,
-see the [vFind-cli](https://github.com/nsbuitrago/vfind-cli) repository.
-
-### PyPI (Recommended for most)
-
 The package is available on [PyPI](https://pypi.org/project/vfind) and can be installed via pip (or alternatives like [uv](https://github.com/astral-sh/uv)).
 
-Below is an example using pip with Python3 in a new project.
+### PyPI (Recommended)
+
+Below is an example using uv to initialize a project and add vfind as a dependency.
 
 ```bash
-# create a new virtual env
-python3 -m venv .venv # create a new virtual env if haven't already
-source .venv/bin/activate # activate the virtual env
-
-python3 -m pip install vfind # install vfind
+uv init
+uv add vfind
 ```
 
-### Nix
-
-vFind is also available on [NixPkgs](https://search.nixos.org/packages?). You can declare new
-enviroments using [nix flakes](https://wiki.nixos.org/wiki/Flakes).
-
-For something quick, you can use nix-shell. For example, the following will
-create a new shell with Python 3.11, vFind, and polars installed.
+and with pip after creating and activating a new virtual environment
 
 ```bash
-nix-shell -p python311 python3Packages.vfind python3Packages.polars
+python3 -m venv .venv
+source .venv/bin/activate
+
+python3 -m pip install vfind
+
+```
+
+### Source
+
+vFind is developed using PyO3 and Rust. You will need to make sure you have
+a Rust toolchain installed as well as standard C tooling to build some
+dependencies (i.e., parasail-rs crate).
+
+1. Clone the repository
+
+```bash
+git clone https://github.com/nsbuitrago/vfind.git
+cd vfind
+```
+
+2. Inside the vfind directory, sync dependencies with uv and build vfind
+
+```bash
+uv sync
+
+# this will build and install vfind in the virtual env
+uv run maturin develop --u 
 ```
 
 ## Examples
