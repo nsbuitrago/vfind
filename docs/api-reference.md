@@ -7,7 +7,7 @@ def vfind.find_variants(
     match_score: int = 3,
     mismatch_score: int = -2,
     gap_open_penalty: int = 5,
-    gap_extension_penalty: int = 2,
+    gap_extend_penalty: int = 2,
     accept_prefix_alignment: float = 0.75,
     accept_suffix_alignment: float = 0.75,
     skip_translation: bool = False,
