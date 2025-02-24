@@ -193,15 +193,15 @@ dna_seqs = find_variants(fq_path, adapters, skip_translation=True)
 variants = find_variants(fq_path, adapters, n_threads=6, queue_len=4)
 ```
 
-For more usage details, see the [API reference](docs/api-reference.md).
+For more usage details, see the [API reference](./docs/api-reference.md).
 
 ## Contributing
 
 Feedback is a gift and contributions are more than welcome. Please submit an
 issue or pull request for any bugs, suggestions, or feedback. Please see the 
-[developing](docs/developing) guide for more details on how to work on vFind.
+[developing](./docs/developing) guide for more details on how to work on vFind.
 
 ## License
 
-vFind is licensed under the [MIT license](LICENSE)
+vFind is licensed under the [MIT license](./LICENSE)
 
