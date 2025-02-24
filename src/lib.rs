@@ -1,7 +1,6 @@
-// use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use indicatif::ProgressBar;
 use memchr::memmem;
-use noodles::bgzf;
 use parasail_rs::{Aligner, Matrix, Profile};
 use polars::prelude::*;
 use pyo3::exceptions::PyValueError;
@@ -234,8 +233,8 @@ pub fn find_variants(
         ));
     }
 
-    let bgzf_reader = File::open(fq_path).map(bgzf::Reader::new)?;
-    let reader = Reader::new(bgzf_reader);
+    let gzdecoder = File::open(fq_path).map(MultiGzDecoder::new)?;
+    let reader = Reader::new(gzdecoder);
 
     let scoring_matrix = Matrix::create(b"ATCG", match_score, mismatch_score)
         .expect("Error creating scoring matrix");
