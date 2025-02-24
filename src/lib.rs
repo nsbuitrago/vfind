@@ -167,23 +167,40 @@ fn find_adapter_match(
 ))]
 /// Find variable regions flanked by adapters in a FASTQ dataset.
 ///
-/// Args:
-///     fq_path (str): Path to FASTQ file
-///     adapters (tuple(str, str)): Tuple of prefix and suffix adapters
-///     match_score (int): Match score for alignment (default = 3)
-///     mismatch_score (int): Mismatch score for alignment (default = -2)
-///     gap_open_penalty (int): Gap open penalty for alignment (default = 5)
-///     gap_extend_penalty (int): Gap extend penalty for alignment (default = 2)
-///     accept_prefix_alignment (float): Threshold for accepting prefix alignment (default = 0.75)
-///     accept_suffix_alignment (float): Threshold for accepting suffix alignment (default = 0.75)
-///     n_threads (int): Number of threads (default = 3)
-///     queue_len (int): Queue length (default = 2)
-///     skip_translation (bool): Skip translation (default = False)
-///     skip_alignment (bool): Skip alignments (default = False)
-///     show_progress (bool): Show progress bar (default = True)
+/// Parameters
+/// ----------
 ///
-/// Returns:
-///     polars.DataFrame: dataframe with columns 'sequence' and 'count'
+///     fq_path : str
+///         Path to FASTQ file.
+///     adapters : tuple(str, str)
+///         Tuple of prefix and suffix adapters
+///     match_score : int
+///         Match score for alignment (Optional, default = 3)
+///     mismatch_score : int
+///         Mismatch score for alignment (Optional, default = -2)
+///     gap_open_penalty : int
+///         Gap open penalty for alignment (Optional, default = 5)
+///     gap_extend_penalty : int
+///         Gap extend penalty for alignment (Optional, default = 2)
+///     accept_prefix_alignment : float
+///         Threshold for accepting prefix alignment (Optional, default = 0.75)
+///     accept_suffix_alignment : float
+///         Threshold for accepting suffix alignment (Optional, default = 0.75)
+///     n_threads : int
+///         Number of threads (Optional, default = 3)
+///     queue_len : int
+///         Queue length (Optional, default = 2)
+///     skip_translation : bool
+///         Skip translation to amino-acid sequence (Optional, default = False)
+///     skip_alignment : bool
+///         Skip semi-global alignments (Optional, default = False)
+///     show_progress : bool
+///         Show progress bar (Optional, default = True)
+///
+/// Returns
+/// -------
+///
+///     polars.DataFrame: dataframe with 'sequence' and 'count' columns
 pub fn find_variants(
     fq_path: String,
     adapters: (String, String),
@@ -211,7 +228,6 @@ pub fn find_variants(
         ));
     }
 
-    assert!(accept_suffix_alignment > 0.0 && accept_suffix_alignment <= 1.0);
     if accept_prefix_alignment == 1.0 && accept_suffix_alignment == 1.0 {
         return Err(PyValueError::new_err(
             "Both accept_prefix_alignment and accept_suffix_alignment are set to 1.0. This will result in only accepting exact matches of adapters. Set skip_alignment=True if this is the intended behavior.",
