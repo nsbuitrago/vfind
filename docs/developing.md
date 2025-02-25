@@ -1,8 +1,11 @@
 # Developing
 
-vFind is written in Rust and uses [PyO3](https://pyo3.rs/v0.21.1/) and [Maturin](https://github.com/PyO3/maturin)
-to generate the Python package. To get started, you will need to have the
-[rust toolchain](https://www.rust-lang.org/tools/install) and [Python >= 3.10](https://www.python.org/downloads/).
+vFind is written in Rust and uses [PyO3](https://pyo3.rs/v0.21.1/) and
+[Maturin](https://github.com/PyO3/maturin) to generate the Python package. To
+get started, you will need to have the [rust
+toolchain](https://www.rust-lang.org/tools/install) >= 1.83 and [Python >=
+3.10](https://www.python.org/downloads/). Note that you might be able to use an
+older toolchain < 1.83 but we have not tested this specifically.
 
 Below are some general steps to get up and running. These examples
 use [uv](https://github.com/astral-sh/uv). However, you could do this with
@@ -15,36 +18,30 @@ git clone git@github.com:nsbuitrago/vfind.git
 cd vfind
 ```
 
-2. Create a new Python virtual environment and install dev dependencies.
+2. Sync dependencies with uv and build/install vFind package
 
 ```bash
-uv venv
-source .venv/bin/activate
+uv sync
+uv run maturin develop --uv
 
-# this will intsall maturin, polars, and any other required packages.
-uv pip install -r dev-requirements.txt
+# or with the provided Makefile
+make dev
 ```
 
-3. Build and install the vFind package in your virtual environment with maturin. 
-
-```bash
-# in the root project directory
-maturin develop
-```
-
-4. From here, you can make changes to the Rust library and run `maturin develop`
-to rebuild the package and install it in your virtual environment.
+3. From here, you can make changes to the Rust library and rebuild/install
+the package for testing on the python side.
 
 ## Using the supplied flake.nix
 
-For those that are familiar with [flakes](https://wiki.nixos.org/wiki/Flakes), there is a provided [flake.nix](/flake.nix)
-that uses [devenv](https://devenv.sh) to setup a development environment with all the necessary
-tools installed. To get started, make sure you have [Nix](https://nixos.org/download/) installed and have
-enabled `nix-commands` and `flakes`.
+For those that are familiar with [flakes](https://wiki.nixos.org/wiki/Flakes),
+there is a provided [flake.nix](/flake.nix) to help setup a development
+environment with all the necessary tools installed. To get started, make sure
+you have Nix installed and have enabled `nix-commands` and `flakes`. We
+recommend using the Nix installer from [Determinate
+systems](https://determinate.systems/nix-installer/) to handle this setup
 
-To create a new shell with development tools, run `nix develop --impure`. This
-may take some time on the first run since it will need to build the tools.
+To create a new shell, run `nix develop` in the root of the project. This may
+take some time on the first run since it will need to build the listed packages.
 
-Once in the development shell, you can run continue with the previous steps
-to make necessary changes and build the Python package.
-
+Once in the development shell, you can run continue with the previous steps to
+make necessary changes and build the Python package.
