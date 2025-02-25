@@ -22,11 +22,12 @@ This simple algorithm is summarized as:
 1. Define a pair of adapter sequences that flank the variable region.
 2. For each fastq read, search for exact matches of these adapters.
 3. If both adapters are found exactly, recover the variable region.
-4. For each adapter without an exact match, perform semi-global alignment between the given adapter and read (optional see the [alignment parameters](#using-custom-alignment-parameters) section).
+4. For each adapter without an exact match, perform semi-global alignment between the given adapter and read (see the [alignment parameters](#using-custom-alignment-parameters) section
+for more details).
 5. If the alignment score meets a set threshold, that adapter is considered to match.
 6. If both adapters are exactly or partially matched, recover the variable region.
 7. For exact matches of both adapters, recover the variable region. Otherwise, continue to the next read.
-8. Finally, translate the variable region to its amino acid sequence and filter out any sequences with partial codons (Optional, see the [miscellaneuous](#miscellaneuous) section).
+8. Finally, translate the variable region to its amino acid sequence and filter out any sequences with partial codons (see the [miscellaneous](#miscellaneous) section for more details).
 
 > [!WARNING]
 > Note that vFind doesn't do any kind of preprocessing. For initial quality
@@ -80,7 +81,7 @@ cd vfind
 uv sync
 
 # this will build and install vfind in the virtual env
-uv run maturin develop --u
+uv run maturin develop --uv # or `make dev`
 ```
 
 ## Examples
@@ -155,15 +156,21 @@ variants = find_variants(
 )
 ```
 
-Alignments are accepted if they produce a score above a set threshold. The threshold
-for considering an acceptable alignment can be adjusted with the `accept_prefix_alignment`
-and `accept_suffix_alignment` arguments. By default, both thresholds are set to 0.75.
+Alignments are accepted if they produce a score above a set threshold. The
+threshold for considering an acceptable alignment can be adjusted with the
+`accept_prefix_alignment` and `accept_suffix_alignment` arguments. By default,
+both thresholds are set to 0.75.
 
-The thresholds are represent a percentage of the maximum alignment score. So, a value of 0.75
-means alignments producing scores that are greater than 75% the maximum theoretical score will be accepted. Thus, valid values are between 0 and 1.
+The thresholds are represent a percentage of the maximum alignment score. So, a
+value of 0.75 means alignments producing scores that are greater than 75% the
+maximum theoretical score will be accepted. Thus, valid values are between 0 and
+1.
 
-Either an exact match or partial match (accepted alignment) must be made for both adapter sequences to recover a variant.
-In order to skip alignment and only look for exact matches, set the `skip_alignment` argument to `True`.
+Either an exact match or partial match (accepted alignment) must be made for
+both adapter sequences to recover a variant.  In order to skip alignment and
+only look for exact matches, set the alignment thresolds to 1 (i.e.,
+`accept_suffix_alignment = 1` to only allow perfect matches of the suffix
+adapter).
 
 ### Miscellaneous
 
@@ -203,4 +210,4 @@ issue or pull request for any bugs, suggestions, or feedback. Please see the
 
 ## License
 
-vFind is licensed under the [MIT license](./LICENSE.md)
+vFind is licensed under the [MIT license](./LICENSE)

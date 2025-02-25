@@ -11,7 +11,6 @@ def vfind.find_variants(
     accept_prefix_alignment: float = 0.75,
     accept_suffix_alignment: float = 0.75,
     skip_translation: bool = False,
-    skip_alignment: bool = False,
     show_progress: bool = True,
     n_threads: int = 3,
     queue_len: int = 2,
@@ -39,18 +38,15 @@ alignment. Note that this is given as a positive integer.
 used for alignment. Note that this is given as a positive integer.
 
 **accept_prefix_alignment: float (0, 1] \[Optional, Default = 0.75\]:** Threshold for
-accepting alignments between read and 5' adapter (prefix) sequences.
+accepting alignments between read and 5' adapter (prefix) sequences. Set to 1 to
+skip alignment and only allow perfect matches of the prefix.
 
 **accept_suffix_alignment: float (0, 1] \[Optional, Default = 0.75\]:** Threshold for
-accepting alignments between read and 3' adapter (suffix) sequences.
-
-Note that if you use an accept threshold of 1, you should set `skip_alignment` to `True`.
+accepting alignments between read and 3' adapter (suffix) sequences. Set to 1 to
+skip alignment and only allow perfect matches of the suffix.
 
 **skip_translation: bool \[Optional, Default = False\]:** Whether to skip
 in-frame translation and return DNA sequences.
-
-**skip_alignment: bool \[Optional, Default = False\]:** Whether to skip
-semi-global alignment and only search for exact adapter matches.
 
 **show_progress: bool \[Optional, Default = True\]:** Whether to show
 visual progress bar.*
@@ -65,4 +61,3 @@ fastq.
 
 **polars.DataFrame:** Dataframe with `sequence` and `count` columns
 corresponding to recovered sequences mapped to raw read counts.
-

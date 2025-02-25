@@ -94,35 +94,56 @@ static ASCII_TO_INDEX: [usize; 128] = [
     4, 4, 4, 4, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, // 112-127  (116 = t, 117 = u)
 ];
 
+// Checks if the accepted alignment threshold is valid. Thresholds must
+// be a float in the range (0, 1]. If the threshold is set to 1, alignments
+// are skipped.
+fn align_threshold_preflight(align_threshold: f64) -> PyResult<bool> {
+    if align_threshold > 0. && align_threshold < 1. {
+        return Ok(false);
+    } else if align_threshold == 1. {
+        return Ok(true);
+    }
+
+    Err(PyValueError::new_err(
+        "Accept alignment threshold must be between 0 and 1.",
+    ))
+}
+
 /// Construct and return aligner with an adapter profile.
 fn get_aligner(
     adapter: &[u8],
     scoring_matrix: &Matrix,
     gap_open_penalty: i32,
     gap_extend_penalty: i32,
-) -> Aligner {
+    skip_alignment: bool,
+) -> Option<Aligner> {
+    if skip_alignment {
+        return None;
+    }
+
     let adapter_profile = Profile::new(adapter, true, scoring_matrix)
         .map_err(|e| PyValueError::new_err(format!("Error creating profile for adapter: {}", e)))
         .unwrap();
 
-    Aligner::new()
+    let aligner = Aligner::new()
         .profile(adapter_profile)
         .gap_open(gap_open_penalty)
         .gap_extend(gap_extend_penalty)
         .semi_global()
         .scan()
         .use_stats()
-        .build()
+        .build();
+
+    Some(aligner)
 }
 
 /// Find where adapter matches in the read if it exists
 fn find_adapter_match(
     seq: &[u8],
     adapter: &[u8],
-    aligner: &Aligner,
+    aligner: Option<&Aligner>,
     min_align_score: f64,
     is_prefix: bool,
-    skip_alignment: bool,
 ) -> Option<usize> {
     let exact_match = memmem::find(seq, adapter);
     if let Some(exact_match) = exact_match {
@@ -131,11 +152,7 @@ fn find_adapter_match(
             false => Some(exact_match),
         }
     } else {
-        if skip_alignment {
-            return None;
-        }
-
-        let alignment = aligner.align(None, seq).unwrap();
+        let alignment = aligner?.align(None, seq).unwrap();
         let score = alignment.get_score();
         if score as f64 > min_align_score {
             match is_prefix {
@@ -161,7 +178,6 @@ fn find_adapter_match(
     n_threads=3,
     queue_len=2,
     skip_translation=false,
-    skip_alignment=false,
     show_progress=true,
 ))]
 /// Find variable regions flanked by adapters in a FASTQ dataset.
@@ -212,47 +228,32 @@ pub fn find_variants(
     n_threads: u32,
     queue_len: usize,
     skip_translation: bool,
-    skip_alignment: bool,
     show_progress: bool,
 ) -> PyResult<PyDataFrame> {
-    if accept_prefix_alignment > 1.0 || accept_prefix_alignment <= 0.0 {
-        return Err(PyValueError::new_err(
-            "accept_prefix_alignment must be between 0 and 1",
-        ));
-    }
-
-    if accept_suffix_alignment > 1.0 || accept_suffix_alignment <= 0.0 {
-        return Err(PyValueError::new_err(
-            "accept_suffix_alignment must be between 0 and 1",
-        ));
-    }
-
-    if accept_prefix_alignment == 1.0 && accept_suffix_alignment == 1.0 {
-        return Err(PyValueError::new_err(
-            "Both accept_prefix_alignment and accept_suffix_alignment are set to 1.0. This will result in only accepting exact matches of adapters. Set skip_alignment=True if this is the intended behavior.",
-        ));
-    }
-
     let gzdecoder = File::open(fq_path).map(MultiGzDecoder::new)?;
     let reader = Reader::new(gzdecoder);
 
     let scoring_matrix = Matrix::create(b"ATCG", match_score, mismatch_score)
         .expect("Error creating scoring matrix");
 
+    let skip_prefix_alignment = align_threshold_preflight(accept_prefix_alignment)?;
     let prefix = adapters.0.as_bytes();
     let prefix_aligner = get_aligner(
         prefix,
         &scoring_matrix,
         gap_open_penalty,
         gap_extend_penalty,
+        skip_prefix_alignment,
     );
 
+    let skip_suffix_alignment = align_threshold_preflight(accept_suffix_alignment)?;
     let suffix = adapters.1.as_bytes();
     let suffix_aligner = get_aligner(
         suffix,
         &scoring_matrix,
         gap_open_penalty,
         gap_extend_penalty,
+        skip_suffix_alignment,
     );
 
     // min score for accepted prefix and suffix alignment
@@ -274,21 +275,14 @@ pub fn find_variants(
         |record, variant| {
             // find variable region in the read
             let seq = record.seq();
-            let start = find_adapter_match(
-                seq,
-                prefix,
-                &prefix_aligner,
-                min_prefix_score,
-                true,
-                skip_alignment,
-            );
+            let start =
+                find_adapter_match(seq, prefix, prefix_aligner.as_ref(), min_prefix_score, true);
             let end = find_adapter_match(
                 seq,
                 suffix,
-                &suffix_aligner,
+                suffix_aligner.as_ref(),
                 min_suffix_score,
                 false,
-                skip_alignment,
             );
 
             if start.is_some() && end.is_some() && start.unwrap() < end.unwrap() {
