@@ -10,10 +10,6 @@ chronological order.
 - Remove `skip_alignment` keyword argument in favor of setting `accept_*_alignment`
 to 1.
 
-### Improvements
-
-- Added windows wheels
-
 ## 0.2.0 - 2025-05-24
 
 ### Bug Fixes
