@@ -3,12 +3,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use binseq::{BinseqRecord, ParallelProcessor, Result as BinseqResult};
 use memchr::memmem;
 use parasail_rs::{Aligner, Matrix, Profile};
 use pyo3::{PyResult, exceptions::PyValueError};
-
-use crate::translate::translate;
 
 // Checks if the accepted alignment threshold is valid. Thresholds must
 // be a float in the range (0, 1]. If the threshold is set to 1, alignments
@@ -82,16 +79,16 @@ pub(crate) fn find_adapter_match(
 }
 
 #[derive(Clone)]
-pub struct Processor {
-    prefix: Vec<u8>,
-    suffix: Vec<u8>,
-    prefix_aligner: Option<Aligner>,
-    suffix_aligner: Option<Aligner>,
-    min_prefix_score: f64,
-    min_suffix_score: f64,
-    skip_translation: bool,
-    local_variants: Vec<String>,
-    variants: Arc<Mutex<HashMap<String, u64>>>,
+pub(crate) struct Processor {
+    pub(crate) prefix: Vec<u8>,
+    pub(crate) suffix: Vec<u8>,
+    pub(crate) prefix_aligner: Option<Aligner>,
+    pub(crate) suffix_aligner: Option<Aligner>,
+    pub(crate) min_prefix_score: f64,
+    pub(crate) min_suffix_score: f64,
+    pub(crate) skip_translation: bool,
+    pub(crate) local_variants: HashMap<String, u64>,
+    pub(crate) variants: Arc<Mutex<HashMap<String, u64>>>, // FIXME: does dashmap improve performance?
 }
 
 impl Processor {
@@ -104,7 +101,6 @@ impl Processor {
         accept_prefix_alignment: f64,
         accept_suffix_alignment: f64,
         skip_translation: bool,
-        variants: Arc<Mutex<HashMap<String, u64>>>,
     ) -> PyResult<Self> {
         let scoring_matrix = Matrix::create(b"ACGT", match_score, mismatch_score)
             .expect("Error creating scoring matrix");
@@ -133,8 +129,8 @@ impl Processor {
         let min_prefix_score = accept_prefix_alignment * match_score as f64 * prefix.len() as f64;
         let min_suffix_score = accept_suffix_alignment * match_score as f64 * suffix.len() as f64;
 
-        let mut local_variants: Vec<String> = Vec::new();
-        // let mut variants: Arc<Mutex<HashMap<String, u64>>> = Arc::new(Mutex::new(HashMap::new()));
+        let local_variants: HashMap<String, u64> = HashMap::new();
+        let variants: Arc<Mutex<HashMap<String, u64>>> = Arc::new(Mutex::new(HashMap::new()));
 
         Ok(Self {
             prefix: prefix.to_vec(),
@@ -149,7 +145,7 @@ impl Processor {
         })
     }
 
-    fn get_matches(&self, seq: &Vec<u8>) -> (Option<usize>, Option<usize>) {
+    pub(crate) fn get_matches(&self, seq: &Vec<u8>) -> (Option<usize>, Option<usize>) {
         let start = find_adapter_match(
             seq,
             &self.prefix,
@@ -179,50 +175,4 @@ impl Processor {
 
     //     Ok(PyDataFrame(df))
     // }
-}
-
-impl ParallelProcessor for Processor {
-    fn process_record<B: BinseqRecord>(&mut self, record: B) -> BinseqResult<()> {
-        // per record logic
-        // get the seq
-        let mut seq: Vec<u8> = Vec::new();
-        record.decode_s(&mut seq)?;
-        // let (start, end) = self.get_matches(seq);
-
-        let mut variant: Option<Vec<u8>> = None;
-        if let (Some(start), Some(end)) = self.get_matches(&seq) {
-            if start < end {
-                variant = Some(seq[start..end].to_vec());
-            }
-        }
-
-        if let Some(variant) = variant {
-            if self.skip_translation {
-                if let Ok(variant) = String::from_utf8(variant) {
-                    // *self.variants.entry(variant).or_insert(0) += 1;
-                    self.local_variants.push(variant);
-                }
-            } else {
-                // attempt to translate and add to variants
-                if let Some(variant) = translate(&variant) {
-                    // *self.variants.entry(variant).or_insert(0) += 1;
-                    self.local_variants.push(variant);
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn on_batch_complete(&mut self) -> BinseqResult<()> {
-        {
-            let mut variants = self.variants.lock().unwrap();
-            self.local_variants.iter().for_each(|seq| {
-                *variants.entry(seq.into()).or_insert(0) += 1;
-            });
-            self.local_variants.clear();
-        }
-
-        Ok(())
-    }
 }

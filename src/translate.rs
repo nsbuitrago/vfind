@@ -1,6 +1,6 @@
 /// Attempt to translate a DNA sequence to an amino acid sequence. If the sequence
 /// length is not divisible by 3, the None variant is returned.
-pub fn translate(seq: &[u8]) -> Option<String> {
+pub(crate) fn translate(seq: &[u8]) -> Option<String> {
     if seq.len() % 3 != 0 {
         return None;
     }
