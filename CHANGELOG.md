@@ -3,6 +3,19 @@
 All notable changes are documented here under headings (YYYY-MM-DD) in reverse
 chronological order.
 
+## 0.3.1
+
+### Update
+
+bump deps:
+    - flate2 1.1.0 -> 1.1.1
+    - log 0.4.26 -> 0.4.27
+    - parasail-rs 0.7.7 -> 0.7.8
+    - polars 0.46.0 -> 0.48.1
+    - pyo3 0.23.4 -> 0.24.2
+    - pyo3-polars 0.20.0 -> 0.21.0
+    - seq_io 0.3.3 -> 0.3.4
+
 ## 0.3.0 - 2025-05-25
 
 ### Changes
