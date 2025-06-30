@@ -144,20 +144,41 @@ fn find_adapter_match(
     aligner: Option<&Aligner>,
     min_align_score: f64,
     is_prefix: bool,
+    skip_trimming: bool,
 ) -> Option<usize> {
     let exact_match = memmem::find(seq, adapter);
     if let Some(exact_match) = exact_match {
         match is_prefix {
-            true => Some(exact_match + adapter.len()),
-            false => Some(exact_match),
+            // true => Some(exact_match + adapter.len()),
+            // false => Some(exact_match),
+            true => match skip_trimming {
+                true => Some(exact_match),
+                false => Some(exact_match + adapter.len()),
+            },
+            false => match skip_trimming {
+                true => Some(exact_match + adapter.len()),
+                false => Some(exact_match),
+            },
         }
     } else {
         let alignment = aligner?.align(None, seq).unwrap();
         let score = alignment.get_score();
         if score as f64 > min_align_score {
             match is_prefix {
-                true => Some(alignment.get_length().unwrap() as usize),
-                false => Some(seq.len() - alignment.get_length().unwrap() as usize),
+                true => match skip_trimming {
+                    true => Some(
+                        alignment.get_end_ref() as usize + 1
+                            - alignment.get_length().unwrap() as usize,
+                    ),
+                    false => Some(alignment.get_end_ref() as usize + 1),
+                },
+                false => match skip_trimming {
+                    true => Some(alignment.get_end_ref() as usize + 1),
+                    false => Some(
+                        alignment.get_end_ref() as usize + 1
+                            - alignment.get_length().unwrap() as usize,
+                    ),
+                },
             }
         } else {
             None
@@ -178,6 +199,7 @@ fn find_adapter_match(
     n_threads=3,
     queue_len=2,
     skip_translation=false,
+    skip_trimming=false,
     show_progress=true,
 ))]
 /// Find variable regions flanked by adapters in a FASTQ dataset.
@@ -207,15 +229,15 @@ fn find_adapter_match(
 ///         Queue length (Optional, default = 2)
 ///     skip_translation : bool
 ///         Skip translation to amino-acid sequence (Optional, default = False)
-///     skip_alignment : bool
-///         Skip semi-global alignments (Optional, default = False)
+///     skip_trimming : bool
+///         Skip adapter trimming on recovered sequences (Optional, default = False)
 ///     show_progress : bool
 ///         Show progress bar (Optional, default = True)
 ///
 /// Returns
 /// -------
 ///
-///     polars.DataFrame: dataframe with 'sequence' and 'count' columns
+///     variant dataframe (polars.DataFrame): dataframe with 'sequence' and 'count' columns
 pub fn find_variants(
     fq_path: String,
     adapters: (String, String),
@@ -228,6 +250,7 @@ pub fn find_variants(
     n_threads: u32,
     queue_len: usize,
     skip_translation: bool,
+    skip_trimming: bool,
     show_progress: bool,
 ) -> PyResult<PyDataFrame> {
     let gzdecoder = File::open(fq_path).map(MultiGzDecoder::new)?;
@@ -275,14 +298,21 @@ pub fn find_variants(
         |record, variant| {
             // find variable region in the read
             let seq = record.seq();
-            let start =
-                find_adapter_match(seq, prefix, prefix_aligner.as_ref(), min_prefix_score, true);
+            let start = find_adapter_match(
+                seq,
+                prefix,
+                prefix_aligner.as_ref(),
+                min_prefix_score,
+                true,
+                skip_trimming,
+            );
             let end = find_adapter_match(
                 seq,
                 suffix,
                 suffix_aligner.as_ref(),
                 min_suffix_score,
                 false,
+                skip_trimming,
             );
 
             if start.is_some() && end.is_some() && start.unwrap() < end.unwrap() {
@@ -319,10 +349,58 @@ pub fn find_variants(
     Ok(PyDataFrame(df))
 }
 
+#[pyfunction]
+#[pyo3(signature = (
+    query,
+    reference,
+    match_score=3,
+    mismatch_score=-2,
+    gap_open_penalty=5,
+    gap_extend_penalty=2
+))]
+/// Convenience utility for performing one-off semi-global alignments.
+///
+/// Parameters
+/// ----------
+///
+/// query (byte string): query sequence.
+/// reference (byte string): reference sequence.
+/// match_score (int): match score.
+/// mismatch_score (int): mismatch score.
+/// gap_open_penalty (int): gap opening penalty.
+/// gap_extend_penalty (int): gap extension penalty.
+///
+/// Returns
+/// -------
+/// alignment object (Alignment)
+pub fn align(
+    query: &[u8],
+    reference: &[u8],
+    match_score: i32,
+    mismatch_score: i32,
+    gap_open_penalty: i32,
+    gap_extend_penalty: i32,
+) -> PyResult<i32> {
+    let matrix = Matrix::create(b"ACGT", match_score, mismatch_score).unwrap();
+    let aligner = Aligner::new()
+        .matrix(matrix)
+        .gap_open(gap_open_penalty)
+        .gap_extend(gap_extend_penalty)
+        .semi_global()
+        .scan()
+        .use_stats()
+        .build();
+
+    let alignment = aligner.align(Some(query), reference);
+    let score = alignment.unwrap().get_score();
+    Ok(score)
+}
+
 /// vFind Python module
 #[pymodule]
 fn vfind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(find_variants, m)?)?;
+    m.add_function(wrap_pyfunction!(align, m)?)?;
     Ok(())
 }
 
