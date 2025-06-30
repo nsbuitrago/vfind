@@ -1,19 +1,30 @@
-from vfind import find_variants
+from vfind import find_variants, align
 import polars as pl
+from polars.testing import assert_frame_equal
 import os.path as path
 
 TEST_DATA_PATH = path.join("tests", "test_data")
 
-MAGICAL_DF = pl.DataFrame({
-    "sequence": ["MAGICAL"],
-    "count": [4],
-})
+MAGICAL_DF = pl.DataFrame([
+    pl.Series("sequence", ["MAGICAL"], dtype=pl.String),
+    pl.Series("count", [4], dtype=pl.UInt64)
+])
 
-LIIGAND_DF = pl.DataFrame({
-    "sequence": ["LIIGAND"],
-    "count": [4],
-})
+MAGICAL_ADAPTERS_DF = pl.DataFrame([
+    pl.Series("sequence", [
+        "GPSRRDMAGICALPEAEVQ",
+        "GPSRRDMAGICALPEAEVE",
+        "GPSRPDMAGICALPEAEVQ",
+        "GPSRPDMAGICALPEAEVE",
+    ], dtype=pl.String),
+    pl.Series("count", [1,1,1,1], dtype=pl.UInt64)
 
+])
+
+LIIGAND_DF = pl.DataFrame([
+    pl.Series("sequence", ["LIIGAND"], dtype=pl.String),
+    pl.Series("count", [4], dtype=pl.UInt64)
+])
 
 def _test_recovery(adapters: tuple[str, str], fq_path: str, expected_df: pl.DataFrame) -> None:
     """
@@ -27,7 +38,8 @@ def _test_recovery(adapters: tuple[str, str], fq_path: str, expected_df: pl.Data
     csv_path (str): Path to ground truth csv file.
     """
     variants = find_variants(fq_path, adapters, show_progress=False)
-    assert variants.equals(expected_df)
+    assert_frame_equal(variants, expected_df, check_row_order=False)
+    #assert variants.equals(expected_df)
 
 
 def test_long_adapter_recovery():
@@ -66,11 +78,7 @@ def test_keep_adapters():
         path.join(TEST_DATA_PATH, "toy_18bp_barcode.fq.gz"),
         ("GGGCCCAGCCGGCCGGAT", "CCGGAGGCGGAGGTTCAG"),
         skip_trimming=True,
-        show_progress=False
+        show_progress=False,
     )
 
-    print(variants)
-
-
-if __name__ == "__main__":
-    test_keep_adapters()
+    assert_frame_equal(variants, MAGICAL_ADAPTERS_DF, check_row_order=False)

@@ -144,44 +144,41 @@ fn find_adapter_match(
     aligner: Option<&Aligner>,
     min_align_score: f64,
     is_prefix: bool,
-    skip_trimming: bool
+    skip_trimming: bool,
 ) -> Option<usize> {
     let exact_match = memmem::find(seq, adapter);
     if let Some(exact_match) = exact_match {
         match is_prefix {
             // true => Some(exact_match + adapter.len()),
             // false => Some(exact_match),
-            true => {
-                match skip_trimming {
-                    true => Some(exact_match),
-                    false => Some(exact_match + adapter.len())
-                }
+            true => match skip_trimming {
+                true => Some(exact_match),
+                false => Some(exact_match + adapter.len()),
             },
-            false => {
-                match skip_trimming {
-                    true => Some(exact_match + adapter.len()),
-                    false => Some(exact_match)
-                }
-            }
-
+            false => match skip_trimming {
+                true => Some(exact_match + adapter.len()),
+                false => Some(exact_match),
+            },
         }
     } else {
         let alignment = aligner?.align(None, seq).unwrap();
         let score = alignment.get_score();
         if score as f64 > min_align_score {
             match is_prefix {
-                true => {
-                    match skip_trimming {
-                        true => unimplemented!(),
-                        false => Some(alignment.get_end_ref() as usize + 1)
-                    }
+                true => match skip_trimming {
+                    true => Some(
+                        alignment.get_end_ref() as usize + 1
+                            - alignment.get_length().unwrap() as usize,
+                    ),
+                    false => Some(alignment.get_end_ref() as usize + 1),
                 },
-                false => {
-                    match skip_trimming {
-                        true => unimplemented!(),
-                        false => Some(alignment.get_end_ref() as usize + 1 - alignment.get_length().unwrap() as usize)
-                    }
-                }
+                false => match skip_trimming {
+                    true => Some(alignment.get_end_ref() as usize + 1),
+                    false => Some(
+                        alignment.get_end_ref() as usize + 1
+                            - alignment.get_length().unwrap() as usize,
+                    ),
+                },
             }
         } else {
             None
@@ -301,15 +298,21 @@ pub fn find_variants(
         |record, variant| {
             // find variable region in the read
             let seq = record.seq();
-            let start =
-                find_adapter_match(seq, prefix, prefix_aligner.as_ref(), min_prefix_score, true, skip_trimming);
+            let start = find_adapter_match(
+                seq,
+                prefix,
+                prefix_aligner.as_ref(),
+                min_prefix_score,
+                true,
+                skip_trimming,
+            );
             let end = find_adapter_match(
                 seq,
                 suffix,
                 suffix_aligner.as_ref(),
                 min_suffix_score,
                 false,
-                skip_trimming
+                skip_trimming,
             );
 
             if start.is_some() && end.is_some() && start.unwrap() < end.unwrap() {
@@ -347,6 +350,14 @@ pub fn find_variants(
 }
 
 #[pyfunction]
+#[pyo3(signature = (
+    query,
+    reference,
+    match_score=3,
+    mismatch_score=-2,
+    gap_open_penalty=5,
+    gap_extend_penalty=2
+))]
 /// Convenience utility for performing one-off semi-global alignments.
 ///
 /// Parameters
@@ -362,7 +373,14 @@ pub fn find_variants(
 /// Returns
 /// -------
 /// alignment object (Alignment)
-pub fn align(query: &[u8], reference: &[u8], match_score: i32, mismatch_score: i32, gap_open_penalty: i32, gap_extend_penalty: i32) -> PyResult<i32> {
+pub fn align(
+    query: &[u8],
+    reference: &[u8],
+    match_score: i32,
+    mismatch_score: i32,
+    gap_open_penalty: i32,
+    gap_extend_penalty: i32,
+) -> PyResult<i32> {
     let matrix = Matrix::create(b"ACGT", match_score, mismatch_score).unwrap();
     let aligner = Aligner::new()
         .matrix(matrix)
