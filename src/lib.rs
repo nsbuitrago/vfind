@@ -156,8 +156,8 @@ fn find_adapter_match(
         let score = alignment.get_score();
         if score as f64 > min_align_score {
             match is_prefix {
-                true => Some(alignment.get_length().unwrap() as usize),
-                false => Some(seq.len() - alignment.get_length().unwrap() as usize),
+                true => Some(alignment.get_end_ref() as usize + 1),
+                false => Some(alignment.get_end_ref() as usize + 1 - alignment.get_length().unwrap() as usize),
             }
         } else {
             None
