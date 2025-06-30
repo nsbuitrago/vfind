@@ -144,20 +144,44 @@ fn find_adapter_match(
     aligner: Option<&Aligner>,
     min_align_score: f64,
     is_prefix: bool,
+    skip_trimming: bool
 ) -> Option<usize> {
     let exact_match = memmem::find(seq, adapter);
     if let Some(exact_match) = exact_match {
         match is_prefix {
-            true => Some(exact_match + adapter.len()),
-            false => Some(exact_match),
+            // true => Some(exact_match + adapter.len()),
+            // false => Some(exact_match),
+            true => {
+                match skip_trimming {
+                    true => Some(exact_match),
+                    false => Some(exact_match + adapter.len())
+                }
+            },
+            false => {
+                match skip_trimming {
+                    true => Some(exact_match + adapter.len()),
+                    false => Some(exact_match)
+                }
+            }
+
         }
     } else {
         let alignment = aligner?.align(None, seq).unwrap();
         let score = alignment.get_score();
         if score as f64 > min_align_score {
             match is_prefix {
-                true => Some(alignment.get_end_ref() as usize + 1),
-                false => Some(alignment.get_end_ref() as usize + 1 - alignment.get_length().unwrap() as usize),
+                true => {
+                    match skip_trimming {
+                        true => unimplemented!(),
+                        false => Some(alignment.get_end_ref() as usize + 1)
+                    }
+                },
+                false => {
+                    match skip_trimming {
+                        true => unimplemented!(),
+                        false => Some(alignment.get_end_ref() as usize + 1 - alignment.get_length().unwrap() as usize)
+                    }
+                }
             }
         } else {
             None
@@ -178,6 +202,7 @@ fn find_adapter_match(
     n_threads=3,
     queue_len=2,
     skip_translation=false,
+    skip_trimming=false,
     show_progress=true,
 ))]
 /// Find variable regions flanked by adapters in a FASTQ dataset.
@@ -207,6 +232,8 @@ fn find_adapter_match(
 ///         Queue length (Optional, default = 2)
 ///     skip_translation : bool
 ///         Skip translation to amino-acid sequence (Optional, default = False)
+///     skip_trimming : boll
+///         Skip adapter trimming on recovered sequences (Optional, default = False)
 ///     skip_alignment : bool
 ///         Skip semi-global alignments (Optional, default = False)
 ///     show_progress : bool
@@ -228,6 +255,7 @@ pub fn find_variants(
     n_threads: u32,
     queue_len: usize,
     skip_translation: bool,
+    skip_trimming: bool,
     show_progress: bool,
 ) -> PyResult<PyDataFrame> {
     let gzdecoder = File::open(fq_path).map(MultiGzDecoder::new)?;
@@ -276,13 +304,14 @@ pub fn find_variants(
             // find variable region in the read
             let seq = record.seq();
             let start =
-                find_adapter_match(seq, prefix, prefix_aligner.as_ref(), min_prefix_score, true);
+                find_adapter_match(seq, prefix, prefix_aligner.as_ref(), min_prefix_score, true, skip_trimming);
             let end = find_adapter_match(
                 seq,
                 suffix,
                 suffix_aligner.as_ref(),
                 min_suffix_score,
                 false,
+                skip_trimming
             );
 
             if start.is_some() && end.is_some() && start.unwrap() < end.unwrap() {
