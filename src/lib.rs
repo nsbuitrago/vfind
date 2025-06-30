@@ -232,17 +232,15 @@ fn find_adapter_match(
 ///         Queue length (Optional, default = 2)
 ///     skip_translation : bool
 ///         Skip translation to amino-acid sequence (Optional, default = False)
-///     skip_trimming : boll
+///     skip_trimming : bool
 ///         Skip adapter trimming on recovered sequences (Optional, default = False)
-///     skip_alignment : bool
-///         Skip semi-global alignments (Optional, default = False)
 ///     show_progress : bool
 ///         Show progress bar (Optional, default = True)
 ///
 /// Returns
 /// -------
 ///
-///     polars.DataFrame: dataframe with 'sequence' and 'count' columns
+///     variant dataframe (polars.DataFrame): dataframe with 'sequence' and 'count' columns
 pub fn find_variants(
     fq_path: String,
     adapters: (String, String),
@@ -348,10 +346,43 @@ pub fn find_variants(
     Ok(PyDataFrame(df))
 }
 
+#[pyfunction]
+/// Convenience utility for performing one-off semi-global alignments.
+///
+/// Parameters
+/// ----------
+///
+/// query (byte string): query sequence.
+/// reference (byte string): reference sequence.
+/// match_score (int): match score.
+/// mismatch_score (int): mismatch score.
+/// gap_open_penalty (int): gap opening penalty.
+/// gap_extend_penalty (int): gap extension penalty.
+///
+/// Returns
+/// -------
+/// alignment object (Alignment)
+pub fn align(query: &[u8], reference: &[u8], match_score: i32, mismatch_score: i32, gap_open_penalty: i32, gap_extend_penalty: i32) -> PyResult<i32> {
+    let matrix = Matrix::create(b"ACGT", match_score, mismatch_score).unwrap();
+    let aligner = Aligner::new()
+        .matrix(matrix)
+        .gap_open(gap_open_penalty)
+        .gap_extend(gap_extend_penalty)
+        .semi_global()
+        .scan()
+        .use_stats()
+        .build();
+
+    let alignment = aligner.align(Some(query), reference);
+    let score = alignment.unwrap().get_score();
+    Ok(score)
+}
+
 /// vFind Python module
 #[pymodule]
 fn vfind(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(find_variants, m)?)?;
+    m.add_function(wrap_pyfunction!(align, m)?)?;
     Ok(())
 }
 

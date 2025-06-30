@@ -2,7 +2,6 @@ from vfind import find_variants
 import polars as pl
 import os.path as path
 
-
 TEST_DATA_PATH = path.join("tests", "test_data")
 
 MAGICAL_DF = pl.DataFrame({
@@ -14,6 +13,7 @@ LIIGAND_DF = pl.DataFrame({
     "sequence": ["LIIGAND"],
     "count": [4],
 })
+
 
 def _test_recovery(adapters: tuple[str, str], fq_path: str, expected_df: pl.DataFrame) -> None:
     """
@@ -38,6 +38,7 @@ def test_long_adapter_recovery():
         MAGICAL_DF
     )
 
+
 def test_short_adapter_recovery():
     _test_recovery(
         ("GATCATG", "GAACTGC"),
@@ -58,3 +59,18 @@ def test_magical_demultiplex():
         path.join(TEST_DATA_PATH, "demultiplex.fq.gz"),
         LIIGAND_DF
     )
+
+
+def test_keep_adapters():
+    variants = find_variants(
+        path.join(TEST_DATA_PATH, "toy_18bp_barcode.fq.gz"),
+        ("GGGCCCAGCCGGCCGGAT", "CCGGAGGCGGAGGTTCAG"),
+        skip_trimming=True,
+        show_progress=False
+    )
+
+    print(variants)
+
+
+if __name__ == "__main__":
+    test_keep_adapters()
