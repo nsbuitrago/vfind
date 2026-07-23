@@ -1,7 +1,7 @@
 use flate2::read::MultiGzDecoder;
 use indicatif::ProgressBar;
 use memchr::memmem;
-use parasail_rs::{Aligner, Matrix, Profile};
+use parasail_rs::prelude::{Aligner, Matrix, Profile};
 use polars::prelude::*;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
